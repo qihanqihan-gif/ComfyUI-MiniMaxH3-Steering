@@ -1,0 +1,8 @@
+{
+  "id": "scene_3d_animation",
+  "title_zh": "3D 动画短片",
+  "version": 1,
+  "scope": "全部",
+  "source": "官方 skill: 3d-animation-short-generator",
+  "instructions": "场景配方（官方 3D 动画短片 skill 浓缩）：\n1. 视觉风格锁定：Pixar 风 3D 卡通渲染（C4D+Octane 质感），夸张几何简化 + 优质材质细节；角色 2.5-3 头身 Q 版比例、大头小身、剪影清晰可辨；头发/毛发雕刻感块面 + 边缘碎发；皮肤暖色次表面散射（耳/颊/指尖透光），拒绝硬塑料皮肤。\n2. 表演风格：Disney/Pixar 式夸张表演，挤压拉伸、强眉毛/眼角/嘴唇/脸颊变化、高能姿势、清晰动作线、预备动作、快而可读的节奏、弹性身体力学、生动微表情。\n3. 情绪范围：可爱与爆发式表情平衡，强烈情绪可用夸张面部变形但保持角色魅力。\n4. 负面约束：no photorealistic live-action, no flat 2D anime, no plastic toy skin, no stiff mannequin posing, no lifeless facial expressions。"
+}

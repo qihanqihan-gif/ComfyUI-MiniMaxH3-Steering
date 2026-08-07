@@ -1,0 +1,7 @@
+{
+  "id": "two_person_interaction",
+  "title_zh": "双人互动",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "创作策略：双人/多人互动场景——\n1. 每人独立 (S1)/(S2) 说话人 ID，绑定到各自 <Subject N>，全程不交换。\n2. 写清空间关系（站位/距离/朝向/视线交互），防止角色融合或穿模。\n3. 身体接触（牵手/拥抱/搀扶）写明接触点与受力方向。\n4. 负面约束：no character swapping, no merged bodies（多人场景必带）。"
+}

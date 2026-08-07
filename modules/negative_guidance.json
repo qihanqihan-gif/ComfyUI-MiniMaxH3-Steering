@@ -1,0 +1,7 @@
+{
+  "id": "negative_guidance",
+  "title_zh": "负面约束生成规则",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "按场景动态生成负面约束（0-6 条，不默认堆长清单）：\n- 多人场景：防身份交换/角色融合/体型趋同（no character swapping, no merged bodies）。\n- 手部/肢体特写：防多余肢体与手指（no extra limbs, no extra fingers）。\n- 不需要字幕时：no on-screen text。\n- 稳定镜头场景：no camera shake。\n- 循环需求：要求首尾状态闭环（seamless loop / [LOOP]）。\n- 涉及参考图：no changing face, no changing hairstyle, no identity drift。\n- 涉及 UI/界面：no random letters, no unreadable text, no official logo。\n约束用自然英文短句写在提示词尾部，不得与正文描述冲突。"
+}

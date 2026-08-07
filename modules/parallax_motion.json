@@ -1,0 +1,8 @@
+{
+  "id": "parallax_motion",
+  "title_zh": "视差分层平移（Ken Burns 变体）",
+  "version": 1,
+  "scope": "I2VA,FL2VA",
+  "source": "官方运镜表（Pan/Truck）+ 社区横移条目",
+  "instructions": "图生视频通用模板：静帧分层视差——\n1. 分层：前景/中景/背景分速度移动（前景最快、背景最慢），营造空间纵深感。\n2. 运镜：slow lateral truck/pan（水平横移）或 slow dolly（纵深推拉），幅度克制。\n3. 每层微动：前景草叶/中景主体呼吸/背景云动，防「纸片感」。\n4. 用途：风景/建筑/插画/产品展示的静态图活化。\n5. 负面：no flat parallax, no layer separation artifacts, no camera shake。"
+}

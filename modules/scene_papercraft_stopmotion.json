@@ -1,0 +1,8 @@
+{
+  "id": "scene_papercraft_stopmotion",
+  "title_zh": "纸艺定格动画讲解",
+  "version": 1,
+  "scope": "全部",
+  "source": "官方 skill: papercraft-stop-motion-explainer",
+  "instructions": "场景配方（官方纸艺定格讲解 skill 浓缩）：\n1. 视觉语言：手工纸艺质感——剪纸/立体书/分层 diorama/微缩模型定格动画，纸纹理与手工痕迹可见。\n2. 内容：科学/教育/通识讲解，先定学习目标 → 设计视觉隐喻 → 纸角色/分层场景/道具设计。\n3. 动画：纸片逐帧位移（定格感）、镜头运动（纸面推近/转场翻页）、转场与声音设计（纸摩擦声/翻页声）。\n4. 负面约束：no standard 2D cartoons, no line doodles, no live action, no 无纸艺质感的普通动画。"
+}

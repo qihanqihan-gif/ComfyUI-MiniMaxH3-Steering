@@ -1,0 +1,7 @@
+{
+  "id": "motion_emphasis",
+  "title_zh": "动作强化",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "创作策略：动作/打斗/舞蹈场景——\n1. 一个主动作 + 明确起止帧：写明动作的起始姿态、发力瞬间、结束落点。\n2. 用「速度感」词汇：swift / powerful / fluid / weightless，避免笼统的 moves。\n3. 镜头配合动作：动作快 → 手持/跟拍；动作慢 → 长焦/环绕。\n4. 冲击细节：布料/头发/尘土随动作反应（secondary motion）。\n5. 负面约束：no physics glitches, no morphing limbs。"
+}

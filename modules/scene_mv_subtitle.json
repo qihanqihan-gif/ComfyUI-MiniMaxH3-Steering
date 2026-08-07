@@ -1,0 +1,8 @@
+{
+  "id": "scene_mv_subtitle",
+  "title_zh": "MV 字幕（歌词排版）",
+  "version": 1,
+  "scope": "全部",
+  "source": "官方 skill: mv-subtitle-skill-confirmed",
+  "instructions": "场景配方（官方 MV 字幕 skill 浓缩）：\n1. 一体设计：音乐/歌词/排版/参考/节奏/表演/镜头语言共同设计，先分析节拍与演唱时机（卡点）。\n2. 文字分离：角色、场景、文字参考三者分开管理；歌词逐字/逐词排版（beat-reactive spatial typography），文字随节拍变形/位移/闪烁。\n3. 结构：MV 概念 → 分镜提示词 → 歌词文字计划 → 拼接指引；长作品拆成连续短镜头。\n4. 风格示例方向：Trap MV / Gospel hip-hop / Dark-pop / Cyber-grunge 等按音乐气质选。\n5. 不做普通字幕烧录/通用剪辑（无 MV 结构时不适用）。"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "protocol_ref",
+  "title_zh": "核心协议：六段式 Ref2VA（自动加载）",
+  "version": 1,
+  "scope": "Ref2VA",
+  "instructions": "【协议·自动加载，无需选择】输出必须遵循 MiniMax H3 官方 Ref2VA 六段式（固定顺序）：\n1. subject_definitions: 定义引用内容与标签。<Subject N> = 可复用可见内容；<Picture N> = 帧锚点；<Video N>/<Audio N> = 视频/音频资产。四类独立编号，跨段含义恒定。\n2. summary: 以 [任务类型] 开头（keyframe completion / reference generation / video editing / video continuation / audio reuse / audio reference，可 + 组合）。\n3. retention_analysis: 每标签一行（fully_preserved / partially_preserved / attribute_transfer / weak_reference；音频：fully_copy / partially_copy / reference / weak_reference）。\n4. detailed_description: 350-500 英文词，按播放顺序逐镜描述；风格总述句在 [Shot 1] 之前；正文插入标签于首次出现及作用点。\n5. overall_soundscape / 6. non_diegetic_music: 同三段式规则。\n参考图管身份（视觉通道），提示词管动作/时间线——不要重复描述参考图内容。"
+}

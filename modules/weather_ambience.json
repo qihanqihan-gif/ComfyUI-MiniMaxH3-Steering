@@ -1,0 +1,8 @@
+{
+  "id": "weather_ambience",
+  "title_zh": "天气氛围（雨雪雾云）",
+  "version": 1,
+  "scope": "I2VA,FL2VA",
+  "source": "官方 ambient 类案例 + 社区动画氛围条目",
+  "instructions": "图生视频通用模板：天气氛围主导——\n1. 选定主导天气并写明强度与节奏：gentle snowfall / steady rainfall / drifting fog / slow clouds。\n2. 天气与画面互动：雨滴击打地面溅起、雪落肩头堆积、雾中灯光光晕、云影掠过。\n3. 环境反应：植被摇摆/水面波纹/行人衣物飘动随天气联动。\n4. 声音（写进 overall_soundscape）：雨声/风声/雪落簌簌声分层。\n5. 负面：no static sky, no unnatural precipitation, no weather inconsistency。"
+}

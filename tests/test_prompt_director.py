@@ -145,13 +145,15 @@ def test_reject_link_local_target():
 def test_node_registered():
     mod = _load_mod()
     assert "MiniMaxH3PromptDirector" in mod.NODE_CLASS_MAPPINGS
-    # 9 个固定参考图端口
+    # 9 个固定参考资产端口（v0.2 改名，input name 不变保持旧工作流兼容）
     inputs = mod.MiniMaxH3PromptDirector.INPUT_TYPES()
     optional = inputs["optional"]
     for i in range(1, 10):
         assert f"ref_image_{i}" in optional, f"缺少 ref_image_{i}"
+        spec = optional[f"ref_image_{i}"]
+        assert isinstance(spec, tuple) and isinstance(spec[1], dict), "参考资产端口应带 label 参数"
     assert "ref_image_10" not in optional
-    assert mod.MiniMaxH3PromptDirector.RETURN_NAMES == ("enhanced_prompt", "report")
+    assert mod.MiniMaxH3PromptDirector.RETURN_NAMES == ("enhanced_prompt", "report", "reference_sheet")
     assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS() is True, "旧 api_model 值（如 gemma4@q6_k）必须放行"
     required = inputs["required"]
     assert isinstance(required["api_model"], tuple) and required["api_model"][0] == ["auto"], "api_model 应为可刷新 COMBO"
@@ -159,6 +161,13 @@ def test_node_registered():
     assert required["lmstudio_gpu_offload"][0] == ["max", "0.90", "0.75", "0.50", "auto", "off"]
     assert required["api_reasoning"][0] == ["auto", "off", "on"]
     assert required["json_mode"][0] == ["auto_retry", "force", "off"]
+    # v0.1：Auto/Single/Staged（旧值 two_stage/single_pass 兼容映射）
+    assert required["analysis_mode"][0] == ["auto", "single", "staged"], "analysis_mode 默认 auto"
+    assert required["analysis_mode"][1]["default"] == "auto"
+    assert "system_module" in optional, "应可接提示词模块节点输出"
+    # 旧值必须放行（踩坑速记：COMBO 旧值 VALIDATE_INPUTS 放行）
+    assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS(analysis_mode="two_stage") is True
+    assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS(analysis_mode="single_pass") is True
 
 
 def test_lmstudio_root_extraction():
@@ -189,6 +198,78 @@ def test_lmstudio_unload_url_and_tolerance():
     assert root + "/api/v1/models/unload" == "http://127.0.0.1:1234/api/v1/models/unload"
 
 
+def test_analyze_assets_failure_falls_back(monkeypatch):
+    """v0.2：逐素材分析任一失败 → 返回 ([], [原因])，调用方回退单次多图。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(side_effect=RuntimeError("boom")))
+    items, notes = mod._analyze_assets(
+        "http://127.0.0.1:1234/v1", "", "m", [(1, "data:image/jpeg;base64,x")],
+        0.3, 2048, 30, "auto_retry", "auto",
+    )
+    assert items == []
+    assert notes and "回退" in notes[0]
+
+
+def test_analyze_assets_ok(monkeypatch):
+    """v0.2：逐素材分析成功 → sheet_items 带 input_index，保持输入顺序。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value=(
+        '{"appearance": "black hair", "confidence": 0.9}'
+    )))
+    items, notes = mod._analyze_assets(
+        "http://127.0.0.1:1234/v1", "", "m",
+        [(1, "data:image/jpeg;base64,a"), (2, "data:image/jpeg;base64,b")],
+        0.3, 2048, 30, "auto_retry", "auto",
+    )
+    assert len(items) == 2
+    assert items[0]["input_index"] == 1
+    assert items[1]["input_index"] == 2
+    assert items[0]["asset_id"] == "asset_1"
+    assert "逐素材分析 2 张" in notes[0]
+
+
+def test_analyze_assets_bad_json_falls_back(monkeypatch):
+    """v0.2：逐素材输出非 JSON/非对象 → 回退（不把垃圾数据带进合并）。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value="not json at all"))
+    items, notes = mod._analyze_assets(
+        "http://127.0.0.1:1234/v1", "", "m", [(1, "data:image/jpeg;base64,x")],
+        0.3, 2048, 30, "auto_retry", "auto",
+    )
+    assert items == []
+    assert notes and "回退" in notes[0]
+
+
+def test_direct_system_module_injected(monkeypatch):
+    """v0.2：system_module 非空时应并入 system（模块在前，内置规范在后）。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    node = mod.MiniMaxH3PromptDirector()
+    called = MagicMock(return_value='{"integrated_multimodal_description": "ok"}')
+    monkeypatch.setattr(mod, "_call_chat", called)
+    monkeypatch.setattr(mod, "_list_models", MagicMock(return_value=["m"]))
+
+    node.direct(
+        prompt="test", task_type="T2VA", duration_seconds=5.0, shot_count=0,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="auto", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30,
+        analysis_mode="single_pass", system_module="[mod] 模块规则：必须写清楚运镜。",
+    )
+    sent_messages = called.call_args.args[3]
+    system = sent_messages[0]["content"]
+    assert "[mod] 模块规则" in system
+    assert "integrated_multimodal_description" in system, "内置规范应保留在模块之后"
+    assert system.index("[mod]") < system.index("integrated_multimodal_description")
+
+
 def test_direct_no_key_attempts_call(monkeypatch):
     """回归：空 API Key 不再拦截直通（本地 LM Studio 忽略鉴权）——
     应继续尝试调用 API（mock 验证），而不是走"未提供 Key"直通。"""
@@ -200,12 +281,14 @@ def test_direct_no_key_attempts_call(monkeypatch):
     monkeypatch.setattr(mod, "_call_chat", called)
     monkeypatch.setattr(mod, "_list_models", MagicMock(return_value=["m"]))
 
-    enhanced, report = node.direct(
+    enhanced, report, sheet = node.direct(
         prompt="test", task_type="I2VA", duration_seconds=5.0, shot_count=0,
         rewrite_mode="balanced", output_language="中文",
         api_base_url="http://127.0.0.1:1234/v1", api_model="auto", api_key="",
         temperature=0.3, max_tokens=2048, timeout_s=30,
+        analysis_mode="single_pass",
     )
     called.assert_called_once(), "空 key 必须照常发起 API 调用"
     assert "未提供 API Key" not in report
     assert "ok" in enhanced
+    assert sheet == "[]", "无图/单次模式 reference_sheet 应为空 JSON 数组"

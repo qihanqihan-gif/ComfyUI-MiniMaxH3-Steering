@@ -1,0 +1,8 @@
+{
+  "id": "subtle_still_motion",
+  "title_zh": "静态锚定·细微动态",
+  "version": 1,
+  "scope": "I2VA,FL2VA",
+  "source": "官方 I2VA 火车窗案例 + 社区 charming-portrait（subtle handheld breathing）",
+  "instructions": "图生视频通用模板：静态画面 + 细微动态——\n1. 构图锁定：主体/机位/取景与首帧完全一致（static camera），画面整体不移动。\n2. 微动清单（按需 1-3 项）：发丝/衣角随风轻摆、眨眼与呼吸起伏、水面涟漪、云缓慢漂移、灯光微闪烁、尘埃漂浮。\n3. 写法：static camera with subtle breathing；每个微动用「幅度+节奏」限定（barely noticeable / slow drifting / gentle flicker）。\n4. 防漂移负面：no camera movement, no subject movement, no scene morphing, no perspective shift。"
+}

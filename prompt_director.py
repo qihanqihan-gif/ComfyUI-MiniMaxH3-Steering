@@ -23,6 +23,41 @@ import numpy as np
 import torch
 from PIL import Image
 
+# v0.1：协议加载（官方 skill 浓缩，按 task_type 自动注入）与确定性校验器
+# ComfyUI 包内走相对导入；单测（importlib 直载）走 fallback 加载
+_PROMPT_MODULES = None
+_H3_COMPILER = None
+
+
+def _load_prompt_modules():
+    global _PROMPT_MODULES
+    if _PROMPT_MODULES is None:
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location(
+            "prompt_modules",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt_modules.py"),
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["prompt_modules"] = _mod
+        _spec.loader.exec_module(_mod)
+        _PROMPT_MODULES = _mod
+    return _PROMPT_MODULES
+
+
+def _load_h3_compiler():
+    global _H3_COMPILER
+    if _H3_COMPILER is None:
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location(
+            "h3_compiler",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "h3_compiler.py"),
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["h3_compiler"] = _mod
+        _spec.loader.exec_module(_mod)
+        _H3_COMPILER = _mod
+    return _H3_COMPILER
+
 LOGGER = logging.getLogger(__name__)
 
 _ENV_API_KEY = "MINIMAX_H3_API_KEY"
@@ -39,6 +74,25 @@ _REWRITE_MODES = {
     "balanced": "平衡：结构化 + 适度补全细节，保持用户核心意图。",
     "creative": "创意：在用户意图基础上自由发挥，补充生动的镜头语言与细节。",
 }
+
+# v0.2：素材角色选项（默认 auto；用户指定优先于自动判断，见规格书）
+_ASSET_ROLES = [
+    "auto", "人物身份", "物体身份", "场景参考", "风格参考", "首帧", "尾帧", "构图锚点",
+]
+
+# v0.2：两阶段视觉分析——阶段 1 逐素材事实抽取（只提取事实，不写视频提示词）
+_REF_SHEET_SYSTEM_TEMPLATE = """你是参考素材分析器。逐图提取事实，不创作剧情、不写视频提示词。
+对每张图输出 JSON，字段：
+{{
+  "asset_id": "asset_N",
+  "role_hint": "auto/人物身份/物体身份/场景参考/风格参考/首帧/尾帧/构图锚点",
+  "appearance": "主体外观事实（发型/脸型/服装/配饰/比例），未知写 unknown",
+  "pose_and_view": "姿势/视角/景别事实",
+  "scene": "场景/光线/关键地标，无场景内容写 none",
+  "conflicts_risk": "与同批其他素材可能的冲突风险，未知写 unknown",
+  "confidence": 0.0
+}}
+只输出 JSON，不要任何额外说明。"""
 
 _H3_SYSTEM_TEMPLATE = """你是 MiniMax H3 视频生成模型的提示词导演。你的任务是把用户的意图转成 H3 规范的三段式 JSON 提示词。
 
@@ -339,6 +393,41 @@ def _compose_enhanced(parsed) -> str:
     return "\n".join(parts) if parts else ""
 
 
+def _analyze_assets(base_url, key, model, images, temperature,
+                    max_tokens, timeout_s, json_mode, api_reasoning):
+    """v0.2 两阶段视觉分析·阶段 1：逐素材事实抽取（每图一次短调用）。
+
+    返回 (sheet_items, notes)：sheet_items 为每素材 JSON 摘要（保持输入顺序）；
+    notes 为过程说明。任何一张图失败 → 返回 ([], [失败原因])（调用方回退 single_pass）。
+    """
+    notes = []
+    sheet_items = []
+    per_asset_tokens = max(512, min(int(max_tokens or 2048), 2048))
+    for idx, data_url in images:
+        user_content = [
+            {"type": "text", "text": f"分析这张参考素材 asset_{idx}（角色：auto，请自行判断）："},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+        try:
+            item = _parse_json_text(_call_chat(
+                base_url, key, model,
+                [{"role": "system", "content": _REF_SHEET_SYSTEM_TEMPLATE},
+                 {"role": "user", "content": user_content}],
+                temperature, per_asset_tokens, timeout_s,
+                json_mode=json_mode, api_reasoning=api_reasoning,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("MiniMax H3 PromptDirector: 素材 %d 分析失败——回退单次多图: %s", idx, exc)
+            return [], [f"素材 {idx} 分析失败，回退单次多图：{exc}"]
+        if not isinstance(item, dict):
+            return [], [f"素材 {idx} 分析输出非对象，回退单次多图"]
+        item.setdefault("asset_id", f"asset_{idx}")
+        item["input_index"] = idx
+        sheet_items.append(item)
+    notes.append(f"逐素材分析 {len(images)} 张（每张 ≤{per_asset_tokens} token）")
+    return sheet_items, notes
+
+
 class MiniMaxH3PromptDirector:
     @classmethod
     def INPUT_TYPES(cls):
@@ -361,14 +450,19 @@ class MiniMaxH3PromptDirector:
                 # 新 widget 一律追加在末尾（ComfyUI 按位置恢复旧工作流值）
                 "api_reasoning": (["auto", "off", "on"], {"default": "auto"}),
                 "json_mode": (["auto_retry", "force", "off"], {"default": "auto_retry"}),
+                # v0.2：视觉分析模式（两阶段=逐素材事实抽取+合并；单次=原多图直传）
+                # v0.1：Auto=0-2 图单次、3-9 图分阶段；旧值 two_stage/single_pass 兼容映射
+                "analysis_mode": (["auto", "single", "staged"], {"default": "auto"}),
             },
             "optional": {
-                **{f"ref_image_{i}": ("IMAGE",) for i in range(1, 10)},
+                **{f"ref_image_{i}": ("IMAGE", {"label": f"参考资产 {i}"}) for i in range(1, 10)},
+                # v0.2：可接提示词模块节点输出（可选，非空时并入 system）
+                "system_module": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("enhanced_prompt", "report")
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("enhanced_prompt", "report", "reference_sheet")
     FUNCTION = "direct"
     CATEGORY = "MiniMax H3 Lab/Prompt"
 
@@ -376,6 +470,9 @@ class MiniMaxH3PromptDirector:
     def VALIDATE_INPUTS(cls, **kwargs):
         # api_model 的 COMBO 值可能来自旧工作流（旧 STRING 值如 'gemma4@q6_k'
         # 不在刷新后的列表里）——放行，执行时原样使用。
+        # v0.1：analysis_mode 旧值 two_stage/single_pass 也放行（映射为 staged/single）
+        if kwargs.get("analysis_mode") in ("two_stage", "single_pass", "auto", "single", "staged"):
+            return True
         return True
 
     def direct(self, prompt, task_type, duration_seconds, shot_count, rewrite_mode,
@@ -388,13 +485,23 @@ class MiniMaxH3PromptDirector:
         def passthrough(reason: str):
             """直通统一出口：日志 + report，方便用户在控制台看到跳过原因。"""
             LOGGER.warning("MiniMax H3 PromptDirector: %s——已直通原始提示词", reason)
-            return (prompt, f"[直通] {reason}\n已直通原始提示词（未调用 API）。")
+            return (prompt, f"[直通] {reason}\n已直通原始提示词（未调用 API）。", "[]")
         # 收集参考图（固定顺序 1..9，跳过未连接端口）
         images = []
         for i in range(1, 10):
             img = kwargs.get(f"ref_image_{i}")
             if img is not None:
                 images.append((i, _image_tensor_to_data_url(img)))
+
+        # v0.2：素材角色/别名参数已按用户反馈移除（自然语言描述即可）
+        # v0.1：analysis_mode 解析（auto = 0-2 图 single、3-9 图 staged；旧值兼容映射）
+        mode_raw = str(kwargs.get("analysis_mode") or "auto").strip().lower()
+        if mode_raw in ("two_stage", "staged"):
+            staged = True
+        elif mode_raw in ("single_pass", "single"):
+            staged = False
+        else:  # auto
+            staged = len(images) >= 3
 
         # API Key：环境变量优先（与 LingBot 一致支持 OPENAI_API_KEY），节点内次之。
         # 空 key 不拦截：本地 OpenAI 兼容服务（LM Studio 等）忽略 Authorization，
@@ -417,6 +524,17 @@ class MiniMaxH3PromptDirector:
             rewrite_mode_rule=_REWRITE_MODES[rewrite_mode],
             language=output_language,
         )
+        # v0.1：协议自动注入（仅英文输出；Ref2VA→六段式，其余→三段式）+ 创作策略模块
+        protocol = ""
+        if output_language == "English":
+            protocol = _load_prompt_modules().load_protocol(task_type)
+        system_module = str(kwargs.get("system_module") or "").strip()
+        if protocol and system_module:
+            system = protocol + "\n\n" + system_module + "\n\n" + system
+        elif protocol:
+            system = protocol + "\n\n" + system
+        elif system_module:
+            system = system_module + "\n\n" + system
 
         # 模型：auto → 拉取列表，唯一候选自动选；多候选取第一个并提示
         model = api_model.strip()
@@ -431,11 +549,27 @@ class MiniMaxH3PromptDirector:
                 model = models[0]
                 LOGGER.warning("MiniMax H3 PromptDirector: 多个候选模型 %s，取第一个 %s", models, model)
 
-        # 消息构建：文本 + 多图（content 数组，OpenAI 多模态格式）
+        # 消息构建：文本 + 参考内容（staged：逐素材分析摘要文本；否则多图直传）
+        sheet_items, sheet_notes = [], []
+        if staged and images:
+            sheet_items, sheet_notes = _analyze_assets(
+                api_base_url, key, model, images,
+                temperature, max_tokens, timeout_s, json_mode, api_reasoning,
+            )
         user_content = [{"type": "text", "text": prompt}]
-        for idx, data_url in images:
-            user_content.append({"type": "text", "text": f"参考图 {idx}（对应 <Picture {idx}>）："})
-            user_content.append({"type": "image_url", "image_url": {"url": data_url}})
+        if sheet_items:
+            for item in sheet_items:
+                user_content.append({
+                    "type": "text",
+                    "text": f"素材 {item.get('input_index')} 分析摘要（角色={item.get('role')} 别名={item.get('alias') or '无'}）："
+                            + json.dumps({k: v for k, v in item.items()
+                                          if k not in ("input_index", "role", "alias")},
+                                         ensure_ascii=False),
+                })
+        else:
+            for idx, data_url in images:
+                user_content.append({"type": "text", "text": f"参考资产 {idx}（对应 <Picture {idx}>）："})
+                user_content.append({"type": "image_url", "image_url": {"url": data_url}})
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
@@ -466,13 +600,33 @@ class MiniMaxH3PromptDirector:
 
         enhanced = _compose_enhanced(parsed) or prompt
         shots_out = len(parsed.get("shot_breakdown", [])) if isinstance(parsed, dict) else 0
+        # v0.2：Reference Sheet 输出（两阶段时含逐素材事实 JSON，否则空）
+        if sheet_items:
+            sheet_out = json.dumps({"assets": sheet_items}, ensure_ascii=False, indent=2)
+        else:
+            sheet_out = "[]"
         report = "\n".join([
             f"task_type={task_type} 模型={model}",
             f"参考图={len(images)} 张（端口 {[i for i, _ in images]}）",
+            f"分析模式={'staged' if staged else 'single'}",
+            *sheet_notes,
             f"分镜={shots_out} 段  API 耗时={time.time() - t0:.1f}s",
             *lm_notes,
             "提示：参考视频/音频请直接接官方 ReferenceToVideo 的 ref_video/ref_audio 端口（本节点不处理）。",
         ])
+        # v0.1：h3_compiler 接线——确定性校验（errors/warnings 进 report，不阻塞输出）
+        try:
+            vres = _load_h3_compiler().validate_prompt(
+                enhanced, duration=duration_seconds,
+                check_fields=(output_language == "English"),
+            )
+            if vres["errors"]:
+                report += "\n[校验错误] " + "；".join(vres["errors"][:5])
+            if vres["warnings"]:
+                report += "\n[校验警告] " + "；".join(vres["warnings"][:5])
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("MiniMax H3 PromptDirector: 校验器异常（不阻塞）: %s", exc)
+        return (enhanced, report, sheet_out)
         return (enhanced, report)
 
 

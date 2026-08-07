@@ -1,0 +1,7 @@
+{
+  "id": "seamless_loop",
+  "title_zh": "无缝循环",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "创作策略：循环视频场景——\n1. 首帧与尾帧状态必须闭环（同姿势/同机位/同光照），运动方向允许循环。\n2. 循环点附近运动速度趋于一致，避免跳变。\n3. 建议单镜（无切镜）便于无缝拼接。\n4. 写法：a perfect seamless loop / the cycle repeats infinitely / [LOOP]。\n5. 负面约束：no jump cut, no visible loop seam。"
+}

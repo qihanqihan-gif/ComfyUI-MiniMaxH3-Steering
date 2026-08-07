@@ -1,0 +1,7 @@
+{
+  "id": "official_three_part",
+  "title_zh": "官方三段式规范",
+  "version": 1,
+  "scope": "T2VA,I2VA,FL2VA",
+  "instructions": "输出必须遵循 MiniMax H3 官方三段式结构（字段名与顺序严格）：\n1. integrated_multimodal_description: 沿时间线的画面/动作/镜头/说话人/对白/剧情声主字段。镜头用 [Shot N] 标记：首镜不写时间戳，后续镜头写 [Shot N] At MM:SS.mmm（严格递增，不超过总时长）。开头先写风格总述句（Cinematic / live-action / 2D-animated / 3D CG 等）。\n2. overall_soundscape: 全程环境声/动作声/非语言人声概括（1-4 句一段；完全静音才写 N/A）。\n3. non_diegetic_music: 仅观众可听的配乐（1-3 句，写乐器/速度/节奏/动态，禁用抽象情绪词；禁 BGM 时写 N/A）。\n运镜写法：类型（Zoom/Push/Pan/Truck/Tilt/Pedestal/Arc/Tracking/Static/Shake/POV/Roll）+ 幅度（small/large amplitude）+ 速度（slow/fast speed），自然融入英文句子。\n说话人：稳定 ID (S1)(S2)，首次出现给足身份信息；画外旁白注明 lips remain completely closed。\n正文用英文，对白/歌词/屏幕文字保留原语言。"
+}

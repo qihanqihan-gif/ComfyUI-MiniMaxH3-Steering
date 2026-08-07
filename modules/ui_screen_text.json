@@ -1,0 +1,7 @@
+{
+  "id": "ui_screen_text",
+  "title_zh": "UI 与屏幕文字",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "创作策略：含 UI/屏幕文字/字幕的场景——\n1. 屏幕文字逐字保留原语言并放入英文双引号（如 A red neon sign reading \"营业中\"），写明位置/样式/颜色。\n2. 游戏/应用 UI：指定布局要点（顶部 HUD/右下角按钮），防乱码与随机字符。\n3. 字幕与对白同步：字幕出现时机对应 (S1) 对白行。\n4. 负面约束：no random letters, no unreadable text, no gibberish UI。"
+}

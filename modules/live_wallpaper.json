@@ -1,0 +1,8 @@
+{
+  "id": "live_wallpaper",
+  "title_zh": "动态壁纸（无缝循环）",
+  "version": 1,
+  "scope": "I2VA,FL2VA",
+  "source": "社区壁纸类条目 + 官方循环要点",
+  "instructions": "图生视频通用模板：动态壁纸——\n1. 首尾闭环：首帧与尾帧状态完全一致（同构图/同光照/同姿态），循环无缝。\n2. 运动：慢速氛围动效（云漂/水波/粒子/光晕缓动），节奏舒缓（slow gentle motion）。\n3. 画幅：默认竖屏 9:16（手机壁纸），构图留呼吸感。\n4. 单镜无切（no cuts），适合长时间循环观看。\n5. 负面：no jump cut, no visible loop seam, no harsh motion, no flickering light。"
+}

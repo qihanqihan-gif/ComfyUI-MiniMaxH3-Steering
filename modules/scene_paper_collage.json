@@ -1,0 +1,8 @@
+{
+  "id": "scene_paper_collage",
+  "title_zh": "纸拼贴讲解视频",
+  "version": 1,
+  "scope": "全部",
+  "source": "官方 skill: paper-collage-explainer-generator",
+  "instructions": "场景配方（官方纸拼贴讲解 skill 浓缩）：\n1. 视觉语言：触感纸拼贴（半调网点 halftone 拼贴），纸质纹理/撕裂边缘/层叠阴影可见。\n2. 内容：抽核心概念 → 设计视觉隐喻（抽象话题具象化为纸拼贴意象）→ 按要点逐段展开。\n3. 运动与声音：纸片运动（插入/翻动/撕开）+ 触感纸声效（默认保留）；默认不加 BGM/旁白/字幕（除非用户要求）。\n4. 适合：科普/观点/故事视觉化/社媒 B-roll。\n5. 负面约束：no presenter ads, no editable layers, no complex typography, no prompt-only output。"
+}

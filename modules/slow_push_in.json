@@ -1,0 +1,8 @@
+{
+  "id": "slow_push_in",
+  "title_zh": "缓慢推进（氛围感）",
+  "version": 1,
+  "scope": "I2VA,FL2VA",
+  "source": "官方 h3-prompt-writing 运镜表（Push）+ 社区氛围条目",
+  "instructions": "图生视频通用模板：缓慢推进镜头——\n1. 运镜：single slow push-in toward the subject（从首帧构图向主体缓慢推进，全程匀速）。\n2. 幅度限定：subtle / gradual / barely perceptible 级推进（避免快速 zoom 的生硬感）。\n3. 配合微动态：推进同时保留主体细微动态（呼吸/发丝/眼神），避免「死画面推镜」。\n4. 情绪用途：氛围建立、悬念铺垫、情绪收束。\n5. 负面：no zoom out, no camera shake, no rapid zoom, no jump cut。"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "scene_minimalist_product_ad",
+  "title_zh": "极简产品广告",
+  "version": 1,
+  "scope": "全部",
+  "source": "官方 skill: minimalist-product-ad-generator",
+  "instructions": "场景配方（官方极简产品广告 skill 浓缩）：\n1. 卖点提炼：从产品信息提取 1-3 个核心卖点，写成精炼英文广告文案（短句/大字排版）。\n2. 产品锚点：产品作为视觉锚点（居中/黄金分割），镜头围绕产品旋转推进，高级镜头语言（缓慢推近/环绕/微距材质特写）。\n3. 版式：节拍同步的排版动画（卖点文字随音乐卡点出现），大面积留白、单色或低饱和背景。\n4. 负面约束：no talking-head KOC 口播, no complex screen demos, no cluttered layout。"
+}

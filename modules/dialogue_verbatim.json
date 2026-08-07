@@ -1,0 +1,7 @@
+{
+  "id": "dialogue_verbatim",
+  "title_zh": "对白与屏幕文字保留规则",
+  "version": 1,
+  "scope": "全部",
+  "instructions": "对白/字幕/屏幕文字规则（官方规范 + 社区实证）：\n1. 对白必须逐字保留原语言：<d>[语言] 原文</d>（如 <d>[English] Hey!</d> 或 <d>[中文] 你好！</d>），不得翻译、不得改写。\n2. 说话人用稳定 ID：<Subject N> (S1)，同一角色全程同一 ID；合唱用 (S1,S2)。\n3. 画外旁白：明确写 narrator-mouth-closed / lips remain completely closed，并描述旁白期间的表情与肢体变化。\n4. 跨切镜对白：用 <scenetrans> + continues seamlessly across the cut；对白被切断用 <cutoff>。\n5. 屏幕文字（招牌/UI/字幕）：英文双引号内逐字保留原语言（如 A neon sign reading \"营业中\"），指明位置与样式。\n6. 嘴型与声音要同步：开口说话的角色必须有对白行，不说话时写明嘴唇闭合。"
+}
