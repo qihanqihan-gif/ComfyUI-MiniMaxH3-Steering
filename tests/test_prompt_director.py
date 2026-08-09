@@ -73,16 +73,19 @@ def test_compose_enhanced_three_part():
     }
     out = mod._compose_enhanced(parsed)
     assert "A girl walks in the rain <Picture 1>" in out
-    assert "环境声：rainfall" in out
-    assert "配乐：soft piano" in out
-    assert "[0.0-2.5s] wide shot" in out and "[2.5-5.0s] close up" in out
+    assert "overall_soundscape: rainfall" in out
+    assert "non_diegetic_music: soft piano" in out
+    assert "分镜：" not in out, "最终输出必须由官方字段序列化，不能追加旧版自创外壳"
 
 
 def test_compose_enhanced_missing_fields():
     mod = _load_mod()
-    assert mod._compose_enhanced({}) == ""
+    empty = mod._compose_enhanced({})
+    assert "integrated_multimodal_description:" in empty
+    assert "overall_soundscape: N/A" in empty
     out = mod._compose_enhanced({"integrated_multimodal_description": "only desc"})
-    assert out == "only desc"
+    assert "integrated_multimodal_description: only desc" in out
+    assert "non_diegetic_music: N/A" in out
 
 
 def test_compose_enhanced_top_level_list_safe():
@@ -153,7 +156,9 @@ def test_node_registered():
         spec = optional[f"ref_image_{i}"]
         assert isinstance(spec, tuple) and isinstance(spec[1], dict), "参考资产端口应带 label 参数"
     assert "ref_image_10" not in optional
-    assert mod.MiniMaxH3PromptDirector.RETURN_NAMES == ("enhanced_prompt", "report", "reference_sheet")
+    assert mod.MiniMaxH3PromptDirector.RETURN_NAMES == (
+        "enhanced_prompt", "report", "reference_sheet", "prompt_ir",
+    )
     assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS() is True, "旧 api_model 值（如 gemma4@q6_k）必须放行"
     required = inputs["required"]
     assert isinstance(required["api_model"], tuple) and required["api_model"][0] == ["auto"], "api_model 应为可刷新 COMBO"
@@ -164,7 +169,9 @@ def test_node_registered():
     # v0.1：Auto/Single/Staged（旧值 two_stage/single_pass 兼容映射）
     assert required["analysis_mode"][0] == ["auto", "single", "staged"], "analysis_mode 默认 auto"
     assert required["analysis_mode"][1]["default"] == "auto"
+    assert required["output_language"][1]["default"] == "English"
     assert "system_module" in optional, "应可接提示词模块节点输出"
+    assert "module_manifest" in optional, "应可接模块清单用于诊断和 IR 追踪"
     # 旧值必须放行（踩坑速记：COMBO 旧值 VALIDATE_INPUTS 放行）
     assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS(analysis_mode="two_stage") is True
     assert mod.MiniMaxH3PromptDirector.VALIDATE_INPUTS(analysis_mode="single_pass") is True
@@ -270,6 +277,50 @@ def test_direct_system_module_injected(monkeypatch):
     assert system.index("[mod]") < system.index("integrated_multimodal_description")
 
 
+def test_direct_module_manifest_is_traced_and_scope_checked(monkeypatch):
+    from unittest.mock import MagicMock
+    import json
+
+    mod = _load_mod()
+    called = MagicMock(return_value=(
+        '{"integrated_multimodal_description":"[Shot 1] A product rotates.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    ))
+    monkeypatch.setattr(mod, "_call_chat", called)
+    manifest = json.dumps({
+        "scope": "Ref2VA",
+        "selected": [{"id": "product_identity_fidelity"}],
+        "issues": [],
+    })
+    _, report, _, prompt_ir = mod.MiniMaxH3PromptDirector().direct(
+        prompt="product", task_type="T2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+        module_manifest=manifest,
+    )
+    assert "模块作用域=Ref2VA" in report
+    assert "product_identity_fidelity" in report
+    assert json.loads(prompt_ir)["applied_modules"] == ["product_identity_fidelity"]
+
+
+def test_direct_chinese_mode_reports_experimental_warning(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value=(
+        '{"integrated_multimodal_description":"[Shot 1] A.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    )))
+    _, report, _, _ = mod.MiniMaxH3PromptDirector().direct(
+        prompt="test", task_type="T2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+    )
+    assert "中文输出属于便捷实验模式" in report
+
+
 def test_direct_no_key_attempts_call(monkeypatch):
     """回归：空 API Key 不再拦截直通（本地 LM Studio 忽略鉴权）——
     应继续尝试调用 API（mock 验证），而不是走"未提供 Key"直通。"""
@@ -281,7 +332,7 @@ def test_direct_no_key_attempts_call(monkeypatch):
     monkeypatch.setattr(mod, "_call_chat", called)
     monkeypatch.setattr(mod, "_list_models", MagicMock(return_value=["m"]))
 
-    enhanced, report, sheet = node.direct(
+    enhanced, report, sheet, prompt_ir = node.direct(
         prompt="test", task_type="I2VA", duration_seconds=5.0, shot_count=0,
         rewrite_mode="balanced", output_language="中文",
         api_base_url="http://127.0.0.1:1234/v1", api_model="auto", api_key="",
@@ -292,3 +343,108 @@ def test_direct_no_key_attempts_call(monkeypatch):
     assert "未提供 API Key" not in report
     assert "ok" in enhanced
     assert sheet == "[]", "无图/单次模式 reference_sheet 应为空 JSON 数组"
+    assert '"task_type": "I2VA"' in prompt_ir
+
+
+def test_dynamic_loaders_work_in_real_english_path():
+    """回归：alpha 曾缺少 import sys，英文协议与 compiler loader 会直接 NameError。"""
+    mod = _load_mod()
+    assert mod._load_prompt_modules().load_protocol("T2VA")
+    assert mod._load_h3_compiler().normalize_task_type("ref2va") == "Ref2VA"
+
+
+def test_direct_invalid_ir_falls_back_to_original_prompt(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value="{}"))
+    node = mod.MiniMaxH3PromptDirector()
+    enhanced, report, sheet, prompt_ir = node.direct(
+        prompt="保留这条原始提示词", task_type="T2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+    )
+    assert enhanced == "保留这条原始提示词"
+    assert "Prompt IR 未通过确定性校验" in report
+    assert sheet == "[]"
+    assert '"task_type": "T2VA"' in prompt_ir
+
+
+def test_direct_ref2va_keeps_all_six_fields(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    response = {
+        "subject_definitions": "<Subject 1> is the woman from <Picture 1>.",
+        "summary": "[reference generation] A portrait scene.",
+        "retention_analysis": "<Subject 1>: fully_preserved.",
+        "detailed_description": "[Shot 1] <Subject 1> turns toward camera.",
+        "overall_soundscape": "Quiet room tone.",
+        "non_diegetic_music": "N/A",
+    }
+    called = MagicMock(return_value=__import__("json").dumps(response))
+    monkeypatch.setattr(mod, "_call_chat", called)
+    node = mod.MiniMaxH3PromptDirector()
+    enhanced, report, _sheet, prompt_ir = node.direct(
+        prompt="portrait", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+    )
+    for field, value in response.items():
+        assert f"{field}: {value}" in enhanced
+    assert "[校验错误]" not in report
+    assert '"task_type": "Ref2VA"' in prompt_ir
+    system = called.call_args.args[3][0]["content"]
+    assert '"subject_definitions"' in system
+    assert '"integrated_multimodal_description"' not in system
+
+
+def test_reference_ports_are_densely_renumbered(monkeypatch):
+    from unittest.mock import MagicMock
+    import torch
+
+    mod = _load_mod()
+    called = MagicMock(return_value=(
+        '{"integrated_multimodal_description":"[Shot 1] <Picture 1> moves.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    ))
+    monkeypatch.setattr(mod, "_call_chat", called)
+    node = mod.MiniMaxH3PromptDirector()
+    _enhanced, report, _sheet, _ir = node.direct(
+        prompt="move", task_type="I2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+        ref_image_3=torch.zeros((1, 8, 8, 3), dtype=torch.float32),
+    )
+    user_content = called.call_args.args[3][1]["content"]
+    labels = [item["text"] for item in user_content if item.get("type") == "text"]
+    assert any("<Picture 1>" in item for item in labels)
+    assert not any("<Picture 3>" in item for item in labels)
+    assert "(3, 1)" in report
+
+
+def test_explicit_key_wins_and_global_openai_key_not_sent_to_arbitrary_host(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    response = (
+        '{"integrated_multimodal_description":"[Shot 1] A.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    )
+    called = MagicMock(return_value=response)
+    monkeypatch.setattr(mod, "_call_chat", called)
+    monkeypatch.setenv("OPENAI_API_KEY", "global-openai-secret")
+    node = mod.MiniMaxH3PromptDirector()
+    common = dict(
+        prompt="test", task_type="T2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="https://example.invalid/v1", api_model="model",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+    )
+    node.direct(api_key="node-secret", **common)
+    assert called.call_args.args[1] == "node-secret"
+    node.direct(api_key="", **common)
+    assert called.call_args.args[1] == "", "全局 OpenAI Key 不得发往任意兼容端点"

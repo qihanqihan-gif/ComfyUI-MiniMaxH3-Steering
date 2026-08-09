@@ -1,7 +1,12 @@
 {
   "id": "seamless_loop",
   "title_zh": "无缝循环",
-  "version": 1,
-  "scope": "全部",
-  "instructions": "创作策略：循环视频场景——\n1. 首帧与尾帧状态必须闭环（同姿势/同机位/同光照），运动方向允许循环。\n2. 循环点附近运动速度趋于一致，避免跳变。\n3. 建议单镜（无切镜）便于无缝拼接。\n4. 写法：a perfect seamless loop / the cycle repeats infinitely / [LOOP]。\n5. 负面约束：no jump cut, no visible loop seam。"
+  "version": 2,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "source": "Project loop heuristic aligned with official natural-language prompt syntax",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "experimental",
+  "features": ["seamless_loop", "closed_state", "single_shot"],
+  "conflicts": ["storyboard_reference_map"],
+  "instructions": "创作策略：生成可循环拼接的单镜短片。\n1. 用可观察状态定义闭环：结束时主体姿势、机位、构图、光照相位和运动速度自然回到开头。\n2. 选择周期运动，如呼吸、摆动、旋转、水波或粒子轨迹，并让循环接点两侧速度与方向连续。\n3. 默认单镜无切；用自然语言说明 the final state naturally matches the opening state，不使用特殊控制标记。\n4. FL2VA 只有在用户提供可闭合的首尾锚点时才承诺强首尾对齐；其他模式只把循环作为生成目标。\n5. 避免在闭环点新增物体、改变身份、突然变光或速度归零。"
 }

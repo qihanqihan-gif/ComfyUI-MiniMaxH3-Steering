@@ -1,8 +1,12 @@
 {
   "id": "scene_paper_collage",
   "title_zh": "纸拼贴讲解视频",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
   "source": "官方 skill: paper-collage-explainer-generator",
-  "instructions": "场景配方（官方纸拼贴讲解 skill 浓缩）：\n1. 视觉语言：触感纸拼贴（半调网点 halftone 拼贴），纸质纹理/撕裂边缘/层叠阴影可见。\n2. 内容：抽核心概念 → 设计视觉隐喻（抽象话题具象化为纸拼贴意象）→ 按要点逐段展开。\n3. 运动与声音：纸片运动（插入/翻动/撕开）+ 触感纸声效（默认保留）；默认不加 BGM/旁白/字幕（除非用户要求）。\n4. 适合：科普/观点/故事视觉化/社媒 B-roll。\n5. 负面约束：no presenter ads, no editable layers, no complex typography, no prompt-only output。"
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["paper_collage", "visual_metaphor", "tactile_sound"],
+  "conflicts": ["scene_papercraft_stopmotion"],
+  "instructions": "官方纸拼贴讲解 skill 的单条 H3 提示词改编。\n1. 把一个核心概念转成一个可读的纸拼贴隐喻，保留纸纹、撕裂边缘、半调网点和层叠阴影。\n2. 在当前短片内安排一个清楚变化，例如纸片进入 → 组合成意象 → 翻开揭示结论，避免塞入完整长篇讲解。\n3. 纸片移动、翻动和撕开应伴随可信的触感声；旁白、字幕和配乐只在用户要求时加入。\n4. 文字若存在必须短、清楚并来自用户输入；不要自动生成复杂排版或虚构事实。\n5. 保持纸拼贴材质一致，避免意外转成普通二维动画、实拍主持人或光滑 CG。"
 }

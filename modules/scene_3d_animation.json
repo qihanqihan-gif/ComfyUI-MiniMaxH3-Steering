@@ -1,8 +1,12 @@
 {
   "id": "scene_3d_animation",
   "title_zh": "3D 动画短片",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
   "source": "官方 skill: 3d-animation-short-generator",
-  "instructions": "场景配方（官方 3D 动画短片 skill 浓缩）：\n1. 视觉风格锁定：Pixar 风 3D 卡通渲染（C4D+Octane 质感），夸张几何简化 + 优质材质细节；角色 2.5-3 头身 Q 版比例、大头小身、剪影清晰可辨；头发/毛发雕刻感块面 + 边缘碎发；皮肤暖色次表面散射（耳/颊/指尖透光），拒绝硬塑料皮肤。\n2. 表演风格：Disney/Pixar 式夸张表演，挤压拉伸、强眉毛/眼角/嘴唇/脸颊变化、高能姿势、清晰动作线、预备动作、快而可读的节奏、弹性身体力学、生动微表情。\n3. 情绪范围：可爱与爆发式表情平衡，强烈情绪可用夸张面部变形但保持角色魅力。\n4. 负面约束：no photorealistic live-action, no flat 2D anime, no plastic toy skin, no stiff mannequin posing, no lifeless facial expressions。"
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["stylized_3d", "character_performance", "material_rendering"],
+  "conflicts": [],
+  "instructions": "官方 3D 动画 skill 的单条 H3 提示词改编。\n1. 先依据用户要求选择写实、风格化、Q 版或舞台化 3D，不默认借用特定商业工作室或渲染器商标。\n2. 写清角色比例、剪影、材质、皮肤/毛发/服装的表面反应，以及光线如何塑造体积。\n3. 表演用准备动作、清晰动作线、挤压拉伸和可读的面部变化建立节奏，但保持角色身份与关节连续。\n4. 把完整 skill 的多阶段策划压缩成当前时长内一个可完成的视觉节拍；不要承诺后期拼接或资产生产。\n5. 根据目标风格按需防止塑料皮肤、木偶僵硬、表情失活或意外转为写实/二维。"
 }

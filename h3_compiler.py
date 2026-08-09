@@ -8,6 +8,7 @@ v0.2 范围：
 设计原则（GPT 5.6 第二轮结论）：编号、时间码、字段顺序、对白闭合这类
 “程序能 100% 检查的东西”不应交给 LLM 保证，由本模块确定性处理。
 """
+import json
 import re
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,154 @@ _THREE_FIELDS = ("integrated_multimodal_description", "overall_soundscape", "non
 _SIX_FIELDS = ("subject_definitions", "summary", "retention_analysis",
                "detailed_description", "overall_soundscape", "non_diegetic_music")
 
+_BASE_TASKS = ("T2VA", "I2VA", "FL2VA", "L2VA")
+_TASKS = _BASE_TASKS + ("Ref2VA",)
+
+
+def normalize_task_type(task_type: str | None, default: str = "T2VA") -> str:
+    """把用户/API 输入规范成官方五种任务名。"""
+    raw = str(task_type or default).strip().upper()
+    mapping = {name.upper(): name for name in _TASKS}
+    if raw not in mapping:
+        raise ValueError(f"不支持的 H3 task_type={task_type!r}，可选：{', '.join(_TASKS)}")
+    return mapping[raw]
+
+
+def build_alignment_line(task_type: str, duration: float, final_shot_number: int = 1) -> str:
+    """按官方 Base guide 生成首帧/首尾帧/尾帧对齐首行。"""
+    task = normalize_task_type(task_type)
+    final_shot = max(1, int(final_shot_number or 1))
+    seconds = f"{max(0.0, float(duration)):.2f}"
+    if task == "T2VA" or task == "Ref2VA":
+        return ""
+    if task == "I2VA":
+        return (
+            "For the target video, at 0.00 seconds into the target video, "
+            "<Picture 1> (from [Shot 1]) is fully referenced."
+        )
+    if task == "FL2VA":
+        return (
+            "How the reference pictures align with the target video — "
+            "Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
+            f"Picture 2 (from Shot {final_shot}) aligns with the {seconds}-second mark of the target video."
+        )
+    return (
+        "How the reference pictures align with the target video — "
+        f"<Picture 1> (from [Shot {final_shot}]) aligns with the {seconds}-second mark of the target video."
+    )
+
+
+def _strip_json_fence(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl >= 0:
+            text = text[first_nl + 1:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return text.strip()
+
+
+def _as_ir_object(value) -> dict:
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, str):
+        raise ValueError("prompt_ir 必须是 JSON 对象或 JSON 字符串")
+    parsed = json.loads(_strip_json_fence(value))
+    if not isinstance(parsed, dict):
+        raise ValueError("prompt_ir 顶层必须是 JSON 对象")
+    return parsed
+
+
+def _legacy_shots_to_description(shots) -> str:
+    """兼容 alpha 的 shot_breakdown，把它确定性转成官方 [Shot N] 文本。"""
+    if not isinstance(shots, list):
+        return ""
+    out = []
+    for index, shot in enumerate(shots, 1):
+        if not isinstance(shot, dict):
+            continue
+        description = str(shot.get("description") or "").strip()
+        if not description:
+            continue
+        if description.startswith("[Shot "):
+            out.append(description)
+            continue
+        if index == 1:
+            out.append(f"[Shot 1] {description}")
+        else:
+            start = shot.get("start_s")
+            if start is None:
+                out.append(f"[Shot {index}] {description}")
+            else:
+                out.append(f"[Shot {index}] At {format_timecode(float(start))}, {description}")
+    return " ".join(out)
+
+
+def _max_shot_number(text: str) -> int:
+    nums = [int(n) for n in re.findall(r"\[Shot\s+(\d+)\]", text or "", re.IGNORECASE)]
+    return max(nums, default=1)
+
+
+def normalize_prompt_ir(prompt_ir, task_type: str | None = None,
+                        duration: float | None = None) -> dict:
+    """接收 LLM JSON/Canonical IR，生成稳定的 H3 Prompt IR。"""
+    source = _as_ir_object(prompt_ir)
+    task = normalize_task_type(task_type or source.get("task_type") or "T2VA")
+    resolved_duration = float(duration if duration is not None else source.get("duration_seconds", 5.0))
+    if not 0.0 < resolved_duration <= 60.0:
+        raise ValueError(f"duration_seconds 必须大于 0 且不超过 60，收到 {resolved_duration}")
+
+    normalized = {
+        "schema_version": "h3_prompt_ir/1.0",
+        "task_type": task,
+        "duration_seconds": resolved_duration,
+    }
+    if task == "Ref2VA":
+        for field in _SIX_FIELDS:
+            normalized[field] = str(source.get(field) or "").strip()
+    else:
+        integrated = str(source.get("integrated_multimodal_description") or "").strip()
+        if not integrated:
+            integrated = _legacy_shots_to_description(source.get("shot_breakdown"))
+        normalized.update({
+            "integrated_multimodal_description": integrated,
+            "overall_soundscape": str(source.get("overall_soundscape") or "").strip(),
+            "non_diegetic_music": str(source.get("non_diegetic_music") or "").strip(),
+        })
+        final_shot = source.get("final_shot_number") or _max_shot_number(integrated)
+        normalized["final_shot_number"] = max(1, int(final_shot))
+        normalized["alignment_line"] = str(source.get("alignment_line") or "").strip() or build_alignment_line(
+            task, resolved_duration, normalized["final_shot_number"]
+        )
+    return normalized
+
+
+def compile_prompt_ir(prompt_ir, task_type: str | None = None,
+                      duration: float | None = None) -> dict:
+    """IR -> 官方 H3 Prompt，并立即执行确定性校验。"""
+    normalized = normalize_prompt_ir(prompt_ir, task_type=task_type, duration=duration)
+    task = normalized["task_type"]
+    if task == "Ref2VA":
+        prompt = serialize_six_part(
+            normalized["subject_definitions"], normalized["summary"],
+            normalized["retention_analysis"], normalized["detailed_description"],
+            normalized["overall_soundscape"], normalized["non_diegetic_music"],
+        )
+        mode = "ref"
+    else:
+        prompt = serialize_three_part(
+            normalized["integrated_multimodal_description"],
+            normalized["overall_soundscape"], normalized["non_diegetic_music"],
+            alignment_line=normalized["alignment_line"],
+        )
+        mode = "base"
+    validation = validate_prompt(
+        prompt, duration=normalized["duration_seconds"], mode=mode, check_fields=True,
+        task_type=task,
+    )
+    return {"prompt": prompt, "ir": normalized, "validation": validation}
+
 
 def _field_order(text: str, fields) -> list[str]:
     """按文本出现顺序收集字段（行首 `field:` 前缀，忽略大小写）。"""
@@ -74,6 +223,20 @@ def _field_order(text: str, fields) -> list[str]:
                 found.append(f)
                 break
     return found
+
+
+def _field_value(text: str, field: str, fields) -> str:
+    """提取一个字段直到下一个协议字段之间的完整内容。"""
+    start_re = re.compile(rf"(?im)^\s*{re.escape(field)}\s*:\s*")
+    match = start_re.search(text or "")
+    if not match:
+        return ""
+    next_re = re.compile(
+        r"(?im)^\s*(?:" + "|".join(re.escape(name) for name in fields) + r")\s*:\s*"
+    )
+    next_match = next_re.search(text, match.end())
+    end = next_match.start() if next_match else len(text)
+    return text[match.end():end].strip()
 
 
 def _consecutive_numbers(nums: list[int]) -> list[str]:
@@ -91,7 +254,7 @@ def _consecutive_numbers(nums: list[int]) -> list[str]:
 
 
 def validate_prompt(text: str, duration: float | None = None, mode: str | None = None,
-                    check_fields: bool = True) -> dict:
+                    check_fields: bool = True, task_type: str | None = None) -> dict:
     """确定性校验最终提示词。
 
     返回 {"errors": [...], "warnings": [...], "checks": {...}}。
@@ -104,52 +267,58 @@ def validate_prompt(text: str, duration: float | None = None, mode: str | None =
     warnings: list[str] = []
     text = text or ""
 
-    # 1) 字段顺序（自动探测模式）
+    # 1) 字段顺序（自动探测后必须重新按目标字段取顺序）
     if check_fields:
-        fields = _SIX_FIELDS if mode == "ref" else (
-            _THREE_FIELDS if mode == "base" else None)
-        if fields:
-            order = _field_order(text, fields)
-            missing = [f for f in fields if f not in order]
-            for f in missing:
-                errors.append(f"缺少字段 `{f}:`")
-            if order:
-                wanted = [f for f in fields if f in order]
-                if order != wanted:
-                    errors.append(f"字段顺序错误：实际 {order}，应为 {wanted}")
-        else:
-            # 自动：六字段全在 → ref；否则按三字段
-            order = _field_order(text, _SIX_FIELDS)
-            mode = "ref" if len(order) >= 4 else "base"
-            if mode == "ref":
-                for f in _SIX_FIELDS:
-                    if f not in order:
-                        errors.append(f"缺少字段 `{f}:`（六段式）")
-            else:
-                for f in _THREE_FIELDS:
-                    if f not in order:
-                        errors.append(f"缺少字段 `{f}:`（三段式）")
+        if mode not in (None, "base", "ref"):
+            raise ValueError(f"mode 必须是 base/ref/None，收到 {mode!r}")
+        if mode is None:
+            ref_markers = _field_order(text, _SIX_FIELDS[:4])
+            mode = "ref" if ref_markers else "base"
+        fields = _SIX_FIELDS if mode == "ref" else _THREE_FIELDS
+        order = _field_order(text, fields)
+        missing = [f for f in fields if f not in order]
+        for f in missing:
+            errors.append(f"缺少字段 `{f}:`")
+        duplicates = sorted({f for f in order if order.count(f) > 1})
+        for f in duplicates:
+            errors.append(f"字段 `{f}:` 出现多次")
+        unique_order = list(dict.fromkeys(order))
+        wanted = [f for f in fields if f in unique_order]
+        if unique_order and unique_order != wanted:
+            errors.append(f"字段顺序错误：实际 {unique_order}，应为 {wanted}")
+        for f in fields:
+            if f in order and not _field_value(text, f, fields):
+                errors.append(f"字段 `{f}:` 内容为空")
     else:
         mode = mode or ("ref" if text.casefold().count("subject_definitions:") else "base")
 
     # 2) 镜头时间码：首镜无时间戳允许；后续严格递增；不超总时长
     # 注意：Python re.findall 对未参与匹配的可选组返回 ''（非 None），故用 truthy 判断
+    shot_field = "detailed_description" if mode == "ref" else "integrated_multimodal_description"
+    shot_text = _field_value(text, shot_field, _SIX_FIELDS if mode == "ref" else _THREE_FIELDS) or text
     shots = [(int(n), parse_timecode(f"{m}:{s}.{ms}") if m else None)
-             for n, m, s, ms in _SHOT_RE.findall(text)]
+             for n, m, s, ms in _SHOT_RE.findall(shot_text)]
+    if not shots and shot_text.strip():
+        warnings.append(f"`{shot_field}` 缺少 [Shot 1]，镜头边界与时间线无法确定性校验")
     if shots:
         last_t = None
         for n, t in shots:
             if t is None:
-                if n != 1 and last_t is not None:
+                if n != 1:
                     warnings.append(f"[Shot {n}] 缺少时间戳（首镜外建议 At MM:SS.mmm）")
                 continue
+            if n == 1:
+                warnings.append("[Shot 1] 不应带时间戳（官方格式从画面起点直接描述首镜）")
             if last_t is not None and t <= last_t:
                 errors.append(f"[Shot {n}] 时间码 {format_timecode(t)} 未严格递增（前一镜 {format_timecode(last_t)}）")
             if duration is not None and t > duration + 0.001:
                 errors.append(f"[Shot {n}] 时间码 {format_timecode(t)} 超过总时长 {duration}s")
             last_t = t
+        shot_numbers = [n for n, _ in shots]
+        if shot_numbers != list(range(1, len(shot_numbers) + 1)):
+            errors.append(f"镜头编号应按出现顺序从 1 连续递增，实际 {shot_numbers}")
         # 裸时间码（无 [Shot N] 前缀）
-        bare = [parse_timecode(f"{m}:{s}.{ms}") for m, s, ms in _BARE_TIME_RE.findall(text)]
+        bare = [parse_timecode(f"{m}:{s}.{ms}") for m, s, ms in _BARE_TIME_RE.findall(shot_text)]
         if bare and len(bare) > len(shots):
             warnings.append("存在无 [Shot N] 前缀的裸时间码，建议统一镜头标记")
 
@@ -160,6 +329,42 @@ def validate_prompt(text: str, duration: float | None = None, mode: str | None =
     for kind, nums in labels.items():
         for issue in _consecutive_numbers(nums):
             errors.append(f"<{kind.capitalize()}> {issue}")
+
+    if task_type is not None:
+        task = normalize_task_type(task_type)
+        expected_pictures = {"T2VA": 0, "I2VA": 1, "FL2VA": 2, "L2VA": 1}.get(task)
+        if expected_pictures is not None:
+            picture_nums = sorted(set(labels.get("picture", [])))
+            overflow = [num for num in picture_nums if num > expected_pictures]
+            if overflow:
+                errors.append(
+                    f"{task} 官方 ImageToVideo 最多提供 {expected_pictures} 个 Picture 锚点，"
+                    f"提示词却使用了 {overflow}；多参考素材应改用 Ref2VA"
+                )
+
+    # Ref2VA：所有正文引用都应先在 subject_definitions 中定义。
+    if mode == "ref":
+        defs_text = _field_value(text, "subject_definitions", _SIX_FIELDS)
+        defined = {(kind.casefold(), int(num)) for kind, num in _LABEL_RE.findall(defs_text)}
+        used_parts = [_field_value(text, field, _SIX_FIELDS) for field in _SIX_FIELDS[1:]]
+        used = {(kind.casefold(), int(num)) for kind, num in _LABEL_RE.findall("\n".join(used_parts))}
+        for kind, num in sorted(used - defined):
+            errors.append(f"正文使用了未在 subject_definitions 定义的 <{kind.capitalize()} {num}>")
+        for kind, num in sorted(defined - used):
+            warnings.append(f"subject_definitions 定义了未在后续字段使用的 <{kind.capitalize()} {num}>")
+
+        retention = _field_value(text, "retention_analysis", _SIX_FIELDS)
+        if _SPEAKER_RE.search(retention):
+            warnings.append("retention_analysis 不应包含 (Sx)；说话人 ID 只属于实际发声描述")
+
+        summary = _field_value(text, "summary", _SIX_FIELDS).lstrip()
+        if summary and not summary.startswith("["):
+            warnings.append("summary 建议以官方方括号任务类型开头，例如 [reference generation]")
+
+        detailed = _field_value(text, "detailed_description", _SIX_FIELDS)
+        first_shot = re.search(r"\[Shot\s+1\]", detailed, re.IGNORECASE)
+        if first_shot and not detailed[:first_shot.start()].strip():
+            warnings.append("detailed_description 建议在 [Shot 1] 前写 1–2 句全片视觉风格")
 
     # 4) 说话人 ID 连续
     speakers = [int(n) for n in _SPEAKER_RE.findall(text)]
@@ -217,7 +422,7 @@ def serialize_three_part(integrated: str, soundscape: str, music: str,
     body.append("integrated_multimodal_description: " + (integrated or "").strip())
     body.append("overall_soundscape: " + (soundscape or "N/A").strip())
     body.append("non_diegetic_music: " + (music or "N/A").strip())
-    parts.append("\n".join(body))
+    parts.append("\n\n".join(body))
     return "\n\n".join(parts)
 
 
@@ -237,7 +442,79 @@ def serialize_six_part(subject_definitions: str, summary: str, retention_analysi
         value = (value or "").strip()
         if name in ("overall_soundscape", "non_diegetic_music") and not value:
             value = "N/A"
-        if not value:
-            continue
         out.append(f"{name}: {value}")
     return "\n\n".join(out)
+
+
+def format_validation_report(result: dict) -> str:
+    """把 validate_prompt 结果整理成适合 ComfyUI 节点查看的短报告。"""
+    errors = list(result.get("errors") or [])
+    warnings = list(result.get("warnings") or [])
+    checks = dict(result.get("checks") or {})
+    lines = [
+        "状态：" + ("通过" if not errors else "存在错误"),
+        f"模式={checks.get('mode', 'unknown')} 镜头={checks.get('shot_count', 0)} 字符={checks.get('char_count', 0)}",
+    ]
+    lines.extend(f"[错误] {item}" for item in errors)
+    lines.extend(f"[警告] {item}" for item in warnings)
+    return "\n".join(lines)
+
+
+class MiniMaxH3CompileValidate:
+    """编译 H3 Prompt IR；若输入不是 JSON，则只校验现有提示词。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt_or_ir": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "placeholder": "粘贴 H3 Prompt IR JSON，或直接粘贴已有 H3 提示词进行校验",
+                }),
+                "task_type": (["AUTO", *_TASKS], {"default": "AUTO"}),
+                "duration_seconds": ("FLOAT", {"default": 5.0, "min": 0.1, "max": 60.0, "step": 0.1}),
+                "fail_on_error": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "BOOLEAN")
+    RETURN_NAMES = ("final_prompt", "validation_report", "normalized_ir", "is_valid")
+    FUNCTION = "compile_or_validate"
+    CATEGORY = "MiniMax H3 Lab/Prompt"
+
+    def compile_or_validate(self, prompt_or_ir, task_type="AUTO", duration_seconds=5.0,
+                            fail_on_error=False):
+        text = str(prompt_or_ir or "").strip()
+        if not text:
+            raise ValueError("prompt_or_ir 不能为空")
+        explicit_task = None if task_type == "AUTO" else task_type
+        try:
+            obj = _as_ir_object(text)
+        except (json.JSONDecodeError, ValueError):
+            mode = None if explicit_task is None else ("ref" if explicit_task == "Ref2VA" else "base")
+            validation = validate_prompt(
+                text, duration=duration_seconds, mode=mode, check_fields=True,
+                task_type=explicit_task,
+            )
+            result = {"prompt": text, "ir": {}, "validation": validation}
+        else:
+            result = compile_prompt_ir(obj, task_type=explicit_task, duration=duration_seconds)
+
+        report = format_validation_report(result["validation"])
+        valid = not result["validation"]["errors"]
+        if fail_on_error and not valid:
+            raise ValueError(report)
+        return (
+            result["prompt"], report,
+            json.dumps(result["ir"], ensure_ascii=False, indent=2) if result["ir"] else "{}",
+            valid,
+        )
+
+
+NODE_CLASS_MAPPINGS = {
+    "MiniMaxH3CompileValidate": MiniMaxH3CompileValidate,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "MiniMaxH3CompileValidate": "MiniMax H3 编译与校验",
+}

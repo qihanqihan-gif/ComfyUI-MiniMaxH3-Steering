@@ -34,13 +34,25 @@ def test_module_files_exist():
     for expected in ("subtle_still_motion", "slow_push_in", "live_wallpaper",
                      "weather_ambience", "parallax_motion"):
         assert expected in ids, f"缺少图生视频模板 {expected}"
-    assert len(modules) == 21, f"可选模块应共 21 个，实际 {len(modules)}"
+    # v0.2：原 21 个 + 5 个通用回归模块
+    assert len(modules) == 26, f"可选模块应共 26 个，实际 {len(modules)}"
     # 协议模块不得作为可选模块列出（由导演节点自动加载）
     assert "protocol_base" not in ids and "protocol_ref" not in ids, "协议不得列为可选模块"
     assert "official_three_part" not in ids and "official_six_part" not in ids, "旧规范模块应被过滤"
     for m in modules:
         assert m.get("id") and m.get("title_zh") and m.get("instructions"), "模块字段不完整"
         assert isinstance(m.get("version", 1), int)
+        assert m.get("source"), f"{m['id']} 缺少来源"
+        assert m.get("evidence_level") in mod._EVIDENCE_LABELS, f"{m['id']} 证据等级无效"
+        assert isinstance(m.get("features"), list) and m["features"], f"{m['id']} 缺少 features"
+        assert not m.get("_metadata_issues"), f"{m['id']} 元数据问题：{m['_metadata_issues']}"
+
+
+def test_new_general_modules_exist():
+    mod = _load_mod()
+    ids = {m["id"] for m in mod._load_modules()}
+    assert {"single_shot_continuity", "dialogue_performance", "product_identity_fidelity",
+            "storyboard_reference_map", "natural_camera_follow"} <= ids
 
 
 def test_load_protocol_base_and_ref():
@@ -51,7 +63,9 @@ def test_load_protocol_base_and_ref():
     assert "integrated_multimodal_description" in base
     assert "subject_definitions" in ref
     assert "subject_definitions" not in base
-    assert mod.load_protocol("ref2va").startswith("【协议")
+    assert mod.load_protocol("ref2va").startswith("【官方 Ref2VA 协议")
+    assert "L2VA" in (json.load(open(os.path.join(LAB_ROOT, "modules", "protocol_base.json"),
+                                     encoding="utf-8"))["scope"])
 
 
 def test_load_protocol_unknown_task_falls_back_base():
@@ -70,24 +84,26 @@ def test_choices_include_modules():
 
 def test_load_none():
     mod = _load_mod()
-    merged, preview, diag = mod.MiniMaxH3PromptModuleLoader().load()
+    merged, preview, diag, manifest = mod.MiniMaxH3PromptModuleLoader().load()
     assert merged == ""
     assert "未选择模块" in preview
+    assert json.loads(manifest)["selected"] == []
 
 
 def test_load_single_module():
     mod = _load_mod()
     node = mod.MiniMaxH3PromptModuleLoader()
-    merged, preview, diag = node.load(module_1="动漫角色身份保持")
-    assert "[anime_identity | 动漫角色身份保持 | v1]" in merged
-    assert "五官/发型/服装配色" in merged
+    merged, preview, diag, manifest = node.load(module_1="动漫角色身份保持")
+    assert "[anime_identity | 动漫角色身份保持 | v2 | 官方规则对齐]" in merged
+    assert "身份锚点" in merged
     assert "（无）" not in merged
+    assert json.loads(manifest)["selected"][0]["id"] == "anime_identity"
 
 
 def test_load_custom_instructions():
     mod = _load_mod()
     node = mod.MiniMaxH3PromptModuleLoader()
-    merged, preview, diag = node.load(custom_instructions="固定镜头：静止机位。")
+    merged, preview, diag, manifest = node.load(custom_instructions="固定镜头：静止机位。")
     assert "[workflow_custom]" in merged
     assert "固定镜头：静止机位。" in merged
     assert "workflow_custom" in preview
@@ -97,8 +113,25 @@ def test_load_scope_all_no_mismatch_note():
     """v0.1 策略模块 scope=全部：任何模式选择都不产生不匹配提示。"""
     mod = _load_mod()
     node = mod.MiniMaxH3PromptModuleLoader()
-    merged, _, _ = node.load(scope="Ref2VA", module_1="无缝循环")
-    assert "不完全匹配" not in merged
+    merged, _, diag, _ = node.load(scope="Ref2VA", module_1="无缝循环")
+    assert "作用域不匹配" not in diag
+
+
+def test_duplicate_selection_is_deduplicated():
+    mod = _load_mod()
+    merged, _, diag, manifest = mod.MiniMaxH3PromptModuleLoader().load(
+        module_1="单镜连续性", module_2="单镜连续性")
+    assert merged.count("[single_shot_continuity |") == 1
+    assert "重复选择已忽略" in diag
+    assert len(json.loads(manifest)["selected"]) == 1
+
+
+def test_conflict_is_reported():
+    mod = _load_mod()
+    _, _, diag, manifest = mod.MiniMaxH3PromptModuleLoader().load(
+        module_1="单镜连续性", module_2="多参考图分镜映射")
+    assert "模块冲突" in diag
+    assert json.loads(manifest)["issues"]
 
 
 def test_is_changed_nan():
@@ -110,7 +143,15 @@ def test_is_changed_nan():
 def test_merged_within_limit():
     mod = _load_mod()
     node = mod.MiniMaxH3PromptModuleLoader()
-    merged, _, diag = node.load(module_1="官方三段式规范", module_2="社区 8 条写作要诀",
-                                module_3="对白与屏幕文字保留规则")
+    merged, _, diag, _ = node.load(module_1="社区 8 条写作要诀", module_2="对白表演与口型",
+                                   module_3="多参考图分镜映射")
     assert len(merged) <= mod._PROMPT_MODULE_MAX_CHARS + 20
     assert "合并字符" in diag
+
+
+def test_selectable_modules_do_not_reintroduce_known_bad_syntax():
+    mod = _load_mod()
+    text = "\n".join(m["instructions"] for m in mod._load_modules())
+    for forbidden in ("[LOOP]", "0-4s", "4-8s", "no prompt-only output",
+                      "no subject movement", "默认竖屏 9:16", "15 秒 16:9"):
+        assert forbidden not in text

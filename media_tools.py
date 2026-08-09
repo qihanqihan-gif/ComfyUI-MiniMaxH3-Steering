@@ -22,6 +22,9 @@ H3_MULTIPLE = 32
 H3_FPS = 24
 H3_AUDIO_LATENT_FPS = 40
 H3_HIDDEN_SIZE = 5376
+H3_BASE_SHORT_EDGE = 768
+H3_MAX_PIXELS = 768 * 1344
+H3_REF_IMAGE_SHORT_EDGE = 2048
 
 
 def _mib(num_bytes: int | float) -> float:
@@ -55,6 +58,42 @@ def _aligned_frame_count_up(frame_count: int) -> int:
 def _video_latent_t(frame_count: int) -> int:
     frame_count = max(5, _aligned_frame_count_down(frame_count))
     return 2 if frame_count <= 5 else ((frame_count - 5) // 17) * 5 + 2
+
+
+def _official_reference_image_shape(
+    width: int,
+    height: int,
+    generation_width: int,
+    generation_height: int,
+    ref_image_size: str,
+) -> tuple[int, int]:
+    """Mirror ComfyUI's native H3 ref-image resize formula (downscale only)."""
+    if ref_image_size == "match":
+        scale = min(1.0, math.sqrt(
+            (generation_width * generation_height) / max(1, width * height)
+        ))
+    elif ref_image_size == "max":
+        scale = min(1.0, H3_REF_IMAGE_SHORT_EDGE / max(1, min(width, height)))
+    else:
+        raise ValueError(f"Unsupported ref_image_size={ref_image_size!r}")
+    return _align_axis(round(width * scale)), _align_axis(round(height * scale))
+
+
+def _official_reference_video_shape(width: int, height: int) -> tuple[int, int]:
+    """Mirror ComfyUI's native H3 ``adapt_canvas`` and small-video fallback."""
+    ratio = width / max(1, height)
+    if ratio >= 1.0:
+        nominal_w, nominal_h = H3_BASE_SHORT_EDGE * ratio, H3_BASE_SHORT_EDGE
+    else:
+        nominal_w, nominal_h = H3_BASE_SHORT_EDGE, H3_BASE_SHORT_EDGE / max(ratio, 1e-9)
+    if nominal_w * nominal_h > H3_MAX_PIXELS:
+        scale = math.sqrt(H3_MAX_PIXELS / (nominal_w * nominal_h))
+        nominal_w *= scale
+        nominal_h *= scale
+    canvas_w, canvas_h = _align_axis(round(nominal_w)), _align_axis(round(nominal_h))
+    if width * height < canvas_w * canvas_h:
+        return _align_axis(width), _align_axis(height)
+    return canvas_w, canvas_h
 
 
 def _resize_chunk(chunk: torch.Tensor, width: int, height: int) -> torch.Tensor:
@@ -144,7 +183,9 @@ def _prepare_geometry(
                     device=scaled.device,
                 )
                 ph, pw = prepared.shape[2:]
-                canvas[:, :, :ph, :pw] = prepared
+                canvas_top = max(0, (out_h - ph) // 2)
+                canvas_left = max(0, (out_w - pw) // 2)
+                canvas[:, :, canvas_top : canvas_top + ph, canvas_left : canvas_left + pw] = prepared
                 prepared = canvas
             detail = "等比覆盖后居中裁剪"
         else:
@@ -301,6 +342,8 @@ class MiniMaxH3ReferenceInspector:
                     {"default": 124, "min": 5, "max": 3600, "step": 1},
                 ),
                 "strict_mode": (["report_only", "raise_on_danger"], {"default": "report_only"}),
+                # 新 widget 追加在末尾，避免旧工作流按位置恢复时把 strict_mode 错配。
+                "ref_image_size": (["match", "max"], {"default": "match"}),
             },
             "optional": {
                 "reference_images": ("IMAGE",),
@@ -372,6 +415,7 @@ class MiniMaxH3ReferenceInspector:
         generation_height: int,
         generation_frames: int,
         strict_mode: str,
+        ref_image_size: str = "match",
         reference_images: torch.Tensor | None = None,
         reference_video: torch.Tensor | None = None,
         reference_audio: dict | None = None,
@@ -397,6 +441,10 @@ class MiniMaxH3ReferenceInspector:
             f"生成目标：{generation_width}×{generation_height}，{generation_frames_aligned}帧，"
             f"目标视频Token约{target_video_tokens:,}（不含文本），音频Token约{target_audio_tokens:,}。"
         )
+        lines.append(
+            "语义：ReferenceToVideo 的 ref_image 都是通用 <Picture i> 参考，不会自动成为第0帧；"
+            "硬首帧应连接 ImageToVideo.first_frame。"
+        )
 
         if isinstance(reference_images, torch.Tensor):
             if reference_images.ndim != 4:
@@ -404,10 +452,17 @@ class MiniMaxH3ReferenceInspector:
             else:
                 count, h, w = map(int, reference_images.shape[:3])
                 raw_mib += _tensor_mib(reference_images)
-                ref_visual_tokens += max(1, h // H3_MULTIPLE) * max(1, w // H3_MULTIPLE)
+                effective_w, effective_h = _official_reference_image_shape(
+                    w, h, generation_width, generation_height, ref_image_size
+                )
+                image_tokens = (
+                    max(1, effective_h // H3_MULTIPLE)
+                    * max(1, effective_w // H3_MULTIPLE)
+                )
+                ref_visual_tokens += image_tokens
                 lines.append(
                     f"参考图片：输入批次{count}张，{w}×{h}，原始张量{_tensor_mib(reference_images):.1f} MiB；"
-                    f"单个参考块约{max(1, h // H3_MULTIPLE) * max(1, w // H3_MULTIPLE):,} Token。"
+                    f"官方{ref_image_size}后约{effective_w}×{effective_h}/单个参考块{image_tokens:,} Token。"
                 )
                 if count > 1:
                     warnings.append("一个官方ref_image接口只读取批次第1张；多张图片应分别连接到多个ref_image接口。")
@@ -423,18 +478,20 @@ class MiniMaxH3ReferenceInspector:
                 raw_mib += raw_video_mib
                 effective_frames = min(frames, generation_frames_aligned)
                 aligned = _aligned_frame_count_down(effective_frames)
+                effective_w, effective_h = _official_reference_video_shape(w, h)
                 if aligned >= 5:
                     video_tokens = (
                         _video_latent_t(aligned)
-                        * max(1, h // H3_MULTIPLE)
-                        * max(1, w // H3_MULTIPLE)
+                        * max(1, effective_h // H3_MULTIPLE)
+                        * max(1, effective_w // H3_MULTIPLE)
                     )
                     ref_visual_tokens += video_tokens
                 else:
                     video_tokens = 0
                 lines.append(
                     f"参考视频：{frames}帧，{w}×{h}，原始张量{raw_video_mib:.1f} MiB；"
-                    f"H3将使用约{aligned}帧/{video_tokens:,} Token。"
+                    f"官方画布约{effective_w}×{effective_h}，将使用约{aligned}帧/{video_tokens:,} Token；"
+                    "VAE按24 FPS编码，Qwen视觉展示抽到2 FPS。"
                 )
                 if frames < 5:
                     dangers.append("参考视频少于5帧，官方节点会直接报错。")

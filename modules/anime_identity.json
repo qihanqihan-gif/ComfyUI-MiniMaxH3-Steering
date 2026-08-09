@@ -1,7 +1,12 @@
 {
   "id": "anime_identity",
   "title_zh": "动漫角色身份保持",
-  "version": 1,
-  "scope": "全部",
-  "instructions": "创作策略：动漫/二次元角色场景下——\n1. 明确锁定参考角色的五官/发型/服装配色（与参考图一致，不换装不改发型）。\n2. 动作幅度符合角色设定（娇小/成熟/冷酷角色各有克制）。\n3. 表情管理：写清微表情（眨眼/抿嘴/脸红）而非笼统「表情丰富」。\n4. 与官方协议互补：身份走参考图通道，本模块只约束「保持一致的强度与细节」描述。"
+  "version": 2,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "source": "MiniMax-H3 official reference-label semantics + project regression notes",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
+  "evidence_level": "official_aligned",
+  "features": ["reference_identity", "anime_character", "micro_expression"],
+  "conflicts": [],
+  "instructions": "创作策略：仅在工作流确实提供角色参考素材时使用。\n1. 将参考角色作为身份锚点，优先保持脸部结构、发型轮廓、服装版型和关键配色；不要把参考图中偶然的姿势误当成永久身份特征。\n2. 动作、表情和构图由用户意图决定，不依据角色外表臆测性格。把笼统的“表情丰富”改写为 1–2 个可见微表情和发生时机。\n3. Ref2VA 用对应 <Subject N> 指向身份；I2VA/FL2VA/L2VA 依赖输入帧本身，不虚构引用标签。\n4. 只在用户要求保持时加入必要的一致性约束，避免重复描述参考图中已经清晰可见的全部细节。"
 }

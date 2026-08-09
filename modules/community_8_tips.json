@@ -1,7 +1,12 @@
 {
   "id": "community_8_tips",
   "title_zh": "社区 8 条写作要诀",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "按社区实证的 8 条 H3 提示词要诀约束输出：\n1. 一个提示词一个主动作：4-15s 短片一个清晰节拍优于三个硬塞。\n2. 写明运镜：不写运镜默认锁死三脚架；Dolly in / pull back / tracking / handheld 等明确写出。\n3. 写出声音：H3 原生同步音频，点名环境声、动作声、甚至一句对白。\n4. 先定光色：用一句光/色句定整体观感。\n5. 给时间感：慢动作/实时/延时，以及节拍落点。\n6. 参考图管身份、提示词管动作：最多 9 图锁脸/服装/产品，prompt 说发生什么。\n7. 时间码分镜：复杂场景用 0-4s / 4-8s 分段或逐秒指令。\n8. 写出不要什么：负面约束（no extra limbs / no on-screen text / no camera shake 等，按场景 0-6 条）。\n提示词长度与任务复杂度匹配：简单动作不要硬凑长文（6000 字只用于多镜/多人/多参考的复杂任务）。"
+  "source": "Community prompting repositories cross-checked against MiniMax-H3 official prompt guide",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["prompt_focus", "camera_intent", "audio_cues", "timing", "conciseness"],
+  "conflicts": [],
+  "instructions": "社区经验（已按官方格式校正）：\n1. 短片先确定一个主叙事节拍；多镜任务也要有清楚的因果和收束。\n2. 仅在镜头运动影响结果时明确写出 Push、Tracking、Pan、Static 等；没有写运镜不等于模型必然锁死三脚架。\n3. 对有意义的环境声、动作声、对白和配乐给出具体声源与时机。\n4. 用一两句确定光线、色彩和媒介质感，不堆互相冲突的风格词。\n5. 写清动作节奏和关键落点；复杂多镜只使用官方 [Shot N] At MM:SS.mmm 格式。\n6. 有参考素材时让素材负责可见身份和外观，提示词负责新动作、镜头与时间线；无参考素材时不要虚构标签。\n7. 负面要求只保留与当前失败风险直接相关的少量自然语言约束。\n8. 长度服从任务复杂度：简单单镜保持精炼，多人、多参考或强叙事任务再增加细节。"
 }

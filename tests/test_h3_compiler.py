@@ -91,6 +91,36 @@ def test_validate_six_part_detected():
     assert res["errors"] == []
 
 
+def test_validate_ref_rejects_undefined_reference_label():
+    mod = _load_mod()
+    text = "\n".join([
+        "subject_definitions: <Subject 1> is the woman.",
+        "summary: [reference generation] A scene using <Picture 1>.",
+        "retention_analysis: <Subject 1>: fully_preserved.",
+        "detailed_description: Visual style. [Shot 1] <Subject 1> enters.",
+        "overall_soundscape: room tone.",
+        "non_diegetic_music: N/A",
+    ])
+    res = mod.validate_prompt(text, mode="ref")
+    assert any("未在 subject_definitions 定义的 <Picture 1>" in e for e in res["errors"])
+
+
+def test_validate_ref_semantic_warnings():
+    mod = _load_mod()
+    text = "\n".join([
+        "subject_definitions: <Subject 1> is the woman.",
+        "summary: A scene.",
+        "retention_analysis: <Subject 1> (S1): fully_preserved.",
+        "detailed_description: [Shot 1] <Subject 1> speaks.",
+        "overall_soundscape: room tone.",
+        "non_diegetic_music: N/A",
+    ])
+    warnings = mod.validate_prompt(text, mode="ref")["warnings"]
+    assert any("retention_analysis" in w and "(Sx)" in w for w in warnings)
+    assert any("方括号任务类型" in w for w in warnings)
+    assert any("视觉风格" in w for w in warnings)
+
+
 # ---------------------------------------------------------------------------
 # 校验：镜头时间码
 # ---------------------------------------------------------------------------
@@ -139,6 +169,27 @@ def test_validate_first_shot_no_timestamp_allowed():
     assert not any("[Shot 1]" in e for e in res["errors"])
 
 
+def test_validate_first_shot_timestamp_warns():
+    mod = _load_mod()
+    text = (
+        "integrated_multimodal_description: "
+        "[Shot 1] At 00:00.000, A. [Shot 2] At 00:02.000, B.\n"
+        "overall_soundscape: N/A\nnon_diegetic_music: N/A"
+    )
+    res = mod.validate_prompt(text, mode="base")
+    assert any("[Shot 1] 不应带时间戳" in item for item in res["warnings"])
+
+
+def test_validate_missing_shot_marker_warns():
+    mod = _load_mod()
+    text = (
+        "integrated_multimodal_description: A dog runs across the room.\n"
+        "overall_soundscape: footsteps.\nnon_diegetic_music: N/A"
+    )
+    res = mod.validate_prompt(text, mode="base")
+    assert any("缺少 [Shot 1]" in item for item in res["warnings"])
+
+
 # ---------------------------------------------------------------------------
 # 校验：标签 / 说话人 / 对白
 # ---------------------------------------------------------------------------
@@ -173,6 +224,26 @@ def test_validate_label_jump():
     )
     res = mod.validate_prompt(text, mode="base")
     assert any("跳号" in e for e in res["errors"]), "1→3 跳号应报错"
+
+
+def test_validate_base_task_rejects_extra_picture_anchors():
+    mod = _load_mod()
+    text = (
+        "integrated_multimodal_description: [Shot 1] <Picture 1> and <Picture 2>.\n"
+        "overall_soundscape: N/A\nnon_diegetic_music: N/A"
+    )
+    res = mod.validate_prompt(text, mode="base", task_type="I2VA")
+    assert any("I2VA" in e and "Ref2VA" in e for e in res["errors"])
+
+
+def test_validate_fl2va_allows_two_picture_anchors():
+    mod = _load_mod()
+    text = (
+        "integrated_multimodal_description: [Shot 1] <Picture 1> transitions to <Picture 2>.\n"
+        "overall_soundscape: N/A\nnon_diegetic_music: N/A"
+    )
+    res = mod.validate_prompt(text, mode="base", task_type="FL2VA")
+    assert not any("Picture 锚点" in e for e in res["errors"])
 
 
 def test_validate_dialogue_closed():
@@ -263,3 +334,62 @@ def test_serialize_six_part_order():
         "detailed_description:", "overall_soundscape:", "non_diegetic_music:")]
     assert idx == sorted(idx)  # 顺序严格
     assert "overall_soundscape: N/A" in out  # 空音频字段默认 N/A
+
+
+def test_compile_base_ir_builds_official_alignment():
+    mod = _load_mod()
+    result = mod.compile_prompt_ir({
+        "integrated_multimodal_description": (
+            "[Shot 1] Opening. [Shot 2] At 00:02.500, the subject reaches the final pose."
+        ),
+        "overall_soundscape": "Room tone.",
+        "non_diegetic_music": "N/A",
+    }, task_type="FL2VA", duration=5.0)
+    assert result["prompt"].startswith("How the reference pictures align")
+    assert "Picture 2 (from Shot 2)" in result["prompt"]
+    assert "5.00-second mark" in result["prompt"]
+    assert result["validation"]["errors"] == []
+
+
+def test_compile_ref_ir_preserves_all_six_sections():
+    mod = _load_mod()
+    source = {
+        "subject_definitions": "<Subject 1> is the dancer from <Picture 1>.",
+        "summary": "[reference generation] A short dance.",
+        "retention_analysis": "<Subject 1>: fully_preserved.",
+        "detailed_description": "[Shot 1] <Subject 1> dances in a studio.",
+        "overall_soundscape": "Footsteps and room tone.",
+        "non_diegetic_music": "N/A",
+    }
+    result = mod.compile_prompt_ir(source, task_type="Ref2VA", duration=5.0)
+    for field, value in source.items():
+        assert f"{field}: {value}" in result["prompt"]
+    assert result["validation"]["errors"] == []
+
+
+def test_validate_auto_mode_checks_base_order_not_six_field_order():
+    mod = _load_mod()
+    text = (
+        "non_diegetic_music: N/A\n"
+        "integrated_multimodal_description: [Shot 1] A.\n"
+        "overall_soundscape: N/A"
+    )
+    result = mod.validate_prompt(text, mode=None)
+    assert result["checks"]["mode"] == "base"
+    assert any("字段顺序错误" in error for error in result["errors"])
+
+
+def test_compile_validate_node_registered_and_accepts_prompt_text():
+    mod = _load_mod()
+    assert "MiniMaxH3CompileValidate" in mod.NODE_CLASS_MAPPINGS
+    node = mod.MiniMaxH3CompileValidate()
+    prompt = (
+        "integrated_multimodal_description: [Shot 1] A cat sleeps.\n\n"
+        "overall_soundscape: Quiet room tone.\n\n"
+        "non_diegetic_music: N/A"
+    )
+    final_prompt, report, normalized, valid = node.compile_or_validate(prompt, "AUTO", 5.0, False)
+    assert final_prompt == prompt
+    assert valid is True
+    assert "状态：通过" in report
+    assert normalized == "{}"

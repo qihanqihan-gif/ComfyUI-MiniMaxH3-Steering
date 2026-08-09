@@ -1,7 +1,12 @@
 {
   "id": "negative_guidance",
   "title_zh": "负面约束生成规则",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "按场景动态生成负面约束（0-6 条，不默认堆长清单）：\n- 多人场景：防身份交换/角色融合/体型趋同（no character swapping, no merged bodies）。\n- 手部/肢体特写：防多余肢体与手指（no extra limbs, no extra fingers）。\n- 不需要字幕时：no on-screen text。\n- 稳定镜头场景：no camera shake。\n- 循环需求：要求首尾状态闭环（seamless loop / [LOOP]）。\n- 涉及参考图：no changing face, no changing hairstyle, no identity drift。\n- 涉及 UI/界面：no random letters, no unreadable text, no official logo。\n约束用自然英文短句写在提示词尾部，不得与正文描述冲突。"
+  "source": "Project heuristic derived from observed H3 failure modes",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": ["risk_based_constraints", "identity_drift", "anatomy", "text_integrity"],
+  "conflicts": [],
+  "instructions": "按场景风险生成 0–4 条短而具体的自然英文约束，不默认附加固定负面尾巴，也不使用未经官方定义的控制标记。\n- 多人接触时，约束身份交换、身体融合或穿插。\n- 手部和肢体特写时，约束多余肢体或不连续关节。\n- 明确不需要可见文字时，约束随机字幕；需要 UI/招牌时，转为要求用户给定文字逐字保持。\n- 明确静止机位时才约束镜头抖动；明确循环时用自然语言描述首尾状态闭合。\n- 有身份参考时，只约束用户要求保持的关键身份特征。\n若约束与正向动作、镜头或声音目标冲突，删除约束而不是同时保留。"
 }

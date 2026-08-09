@@ -1,7 +1,12 @@
 {
   "id": "ui_screen_text",
   "title_zh": "UI 与屏幕文字",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "创作策略：含 UI/屏幕文字/字幕的场景——\n1. 屏幕文字逐字保留原语言并放入英文双引号（如 A red neon sign reading \"营业中\"），写明位置/样式/颜色。\n2. 游戏/应用 UI：指定布局要点（顶部 HUD/右下角按钮），防乱码与随机字符。\n3. 字幕与对白同步：字幕出现时机对应 (S1) 对白行。\n4. 负面约束：no random letters, no unreadable text, no gibberish UI。"
+  "source": "MiniMax-H3 official visible-text preservation rules",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["visible_text", "ui_layout", "subtitle_timing"],
+  "conflicts": [],
+  "instructions": "含 UI、招牌、字幕或屏幕文字时使用。\n1. 用户明确提供的可见文字必须逐字保留原语言并放入英文双引号，写清承载物、位置、排版层级、颜色和出现时机。\n2. 不替用户发明品牌名、产品声明、按钮文案或长段落；缺少原文时先保持简洁，避免生成随机小字。\n3. 游戏或应用界面只描述必要布局和交互状态，不把整套 UI 设计塞进一个短镜头。\n4. 字幕若与对白同步，时间线中将字幕事件与对应的真实说话人 (Sx) 对齐；无对白时不凭空创建说话人编号。\n5. 对文字可读性的要求用正向描述为主，必要时补充防乱码或无关字符的简短约束。"
 }

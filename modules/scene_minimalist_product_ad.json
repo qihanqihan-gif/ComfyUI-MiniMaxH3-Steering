@@ -1,8 +1,12 @@
 {
   "id": "scene_minimalist_product_ad",
   "title_zh": "极简产品广告",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
   "source": "官方 skill: minimalist-product-ad-generator",
-  "instructions": "场景配方（官方极简产品广告 skill 浓缩）：\n1. 卖点提炼：从产品信息提取 1-3 个核心卖点，写成精炼英文广告文案（短句/大字排版）。\n2. 产品锚点：产品作为视觉锚点（居中/黄金分割），镜头围绕产品旋转推进，高级镜头语言（缓慢推近/环绕/微距材质特写）。\n3. 版式：节拍同步的排版动画（卖点文字随音乐卡点出现），大面积留白、单色或低饱和背景。\n4. 负面约束：no talking-head KOC 口播, no complex screen demos, no cluttered layout。"
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["product_anchor", "minimal_layout", "material_closeup", "visible_text"],
+  "conflicts": [],
+  "instructions": "官方极简产品广告 skill 的单条 H3 提示词改编。\n1. 只从用户给定事实中选择一个核心卖点；没有提供文案时不编造产品声明、参数或品牌口号。\n2. 将产品作为稳定视觉锚点，按题材选择居中、黄金分割、缓慢推进、克制环绕或材质特写，不强制每种运镜同时出现。\n3. 使用留白、有限色板和清楚层级；若用户提供可见文字，逐字保留并限制为当前镜头可读的短句。\n4. 声音和排版卡点只在用户要求或有明确音乐输入时启用。\n5. 防止产品形状、logo、包装文字和比例漂移，避免杂乱背景抢走主体。"
 }

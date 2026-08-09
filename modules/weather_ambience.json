@@ -1,8 +1,12 @@
 {
   "id": "weather_ambience",
   "title_zh": "天气氛围（雨雪雾云）",
-  "version": 1,
-  "scope": "I2VA,FL2VA",
-  "source": "官方 ambient 类案例 + 社区动画氛围条目",
-  "instructions": "图生视频通用模板：天气氛围主导——\n1. 选定主导天气并写明强度与节奏：gentle snowfall / steady rainfall / drifting fog / slow clouds。\n2. 天气与画面互动：雨滴击打地面溅起、雪落肩头堆积、雾中灯光光晕、云影掠过。\n3. 环境反应：植被摇摆/水面波纹/行人衣物飘动随天气联动。\n4. 声音（写进 overall_soundscape）：雨声/风声/雪落簌簌声分层。\n5. 负面：no static sky, no unnatural precipitation, no weather inconsistency。"
+  "version": 2,
+  "scope": "全部",
+  "source": "MiniMax-H3 official ambience examples + community animation heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["weather", "environment_interaction", "soundscape"],
+  "conflicts": [],
+  "instructions": "天气氛围策略。\n1. 选择一种主导天气并写清强度、方向和节奏，如 steady rain、light drifting snow、low fog 或 slow cloud cover。\n2. 描述它与可见表面的接触：雨滴打在伞面和水洼、雪在衣物上积落、雾散射灯光、云影经过地面。\n3. 环境和主体只产生符合强度的次级反应，如植被摇动、衣料受风、水面波纹或能见度变化。\n4. overall_soundscape 只写真实可听的声源：雨、风、雷、湿地脚步或物体受风声；轻雪本身通常不应被夸张成清晰声效。\n5. 保持天气、光照和地面状态在时间线上连续，避免无原因突变。"
 }

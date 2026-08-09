@@ -1,7 +1,12 @@
 {
   "id": "cinematic_realism",
   "title_zh": "写实电影感",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "创作策略：写实/电影质感场景——\n1. 风格总述句用专业电影词：anamorphic / shallow depth of field / 35mm film grain / color graded teal-orange。\n2. 灯光先于动作：写明主光方向/色温/硬软光（golden hour / neon rim light）。\n3. 运镜按电影语法：dolly in for emphasis / slow push toward subject / handheld documentary style。\n4. 声音写实：环境声分层（room tone + 具体动作声），配乐克制。"
+  "source": "MiniMax-H3 official prompt guide camera/style principles + project heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["cinematic_style", "lighting", "camera_motivation", "sound_layering"],
+  "conflicts": [],
+  "instructions": "创作策略：建立可信的写实或电影质感，但不默认套用固定滤镜。\n1. 先选择与题材相符的成像语言，例如自然纪录片、克制商业片、手持纪实或精致棚拍；只有用户需要时才使用 anamorphic、film grain、teal-orange 等强风格词。\n2. 明确主光方向、光质和环境反射，让光线与场景物理条件一致。\n3. 运镜必须有叙事动机：跟随动作、揭示信息或改变情绪距离；静止镜头也是有效选择。\n4. 声音按远近和材质分层，配乐是否存在及强度服从用户要求，不用“电影感”替代具体描述。"
 }

@@ -1,8 +1,12 @@
 {
   "id": "scene_coop_game_intro",
   "title_zh": "合作游戏开场动画",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
   "source": "官方 skill: co-op-game-intro-generator",
-  "instructions": "场景配方（官方合作游戏开场 skill 浓缩）：\n1. 双角色集结：两名玩家角色（各自身份线索锁定：名字/外形/配色），角色卡与玩家卡并列展示。\n2. 菜单框架：固定菜单布局（游戏标题 + 按钮 + 图标 + 排版）整体配色协调，动效围绕菜单交互展开（光标/按钮响应/入场动画）。\n3. 事件节奏：角色入场 → 标题亮出 → 菜单交互动效，事件时机与音乐节拍对齐。\n4. 负面约束：不做可玩游戏开发、不做复杂多页 UI、不复制真实品牌 logo、不做无角色的纯标题序列。"
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["two_character_intro", "game_ui", "beat_sync", "visible_text"],
+  "conflicts": [],
+  "instructions": "官方合作游戏开场 skill 的单条 H3 提示词改编。\n1. 保持两名角色各自的外形、配色、名字和屏幕位置稳定，先写角色集结，再写标题或菜单响应。\n2. UI 只保留当前镜头能读清的标题、主按钮和少量图标；所有文字必须来自用户输入，不复制无授权 logo。\n3. 用一个短事件链组织节奏，例如角色入场 → 标题亮起 → 按钮响应，并与给定音乐或声效节拍对齐。\n4. 写清角色与 UI 的前后层级，避免文字贴脸、角色互换或界面随机重排。\n5. 这是开场动画提示词，不生成可玩逻辑、复杂多页界面或真实应用交互。"
 }

@@ -22,26 +22,29 @@ const NODE_TRANSLATIONS = {
       api_reasoning: "模型思考",
       json_mode: "JSON 模式",
       analysis_mode: "视觉分析模式",
-      ref_image_1: "参考资产 1",
-      ref_image_2: "参考资产 2",
-      ref_image_3: "参考资产 3",
-      ref_image_4: "参考资产 4",
-      ref_image_5: "参考资产 5",
-      ref_image_6: "参考资产 6",
-      ref_image_7: "参考资产 7",
-      ref_image_8: "参考资产 8",
-      ref_image_9: "参考资产 9",
+      ref_image_1: "导演识图素材 1（不传给 H3）",
+      ref_image_2: "导演识图素材 2（不传给 H3）",
+      ref_image_3: "导演识图素材 3（不传给 H3）",
+      ref_image_4: "导演识图素材 4（不传给 H3）",
+      ref_image_5: "导演识图素材 5（不传给 H3）",
+      ref_image_6: "导演识图素材 6（不传给 H3）",
+      ref_image_7: "导演识图素材 7（不传给 H3）",
+      ref_image_8: "导演识图素材 8（不传给 H3）",
+      ref_image_9: "导演识图素材 9（不传给 H3）",
       system_module: "提示词模块（接模块节点）",
+      module_manifest: "模块清单（接模块节点第 4 输出）",
       enhanced_prompt: "增强后提示词（接官方节点 prompt）",
       report: "诊断报告",
       reference_sheet: "参考素材分析表（JSON）",
+      prompt_ir: "提示词中间表示（Prompt IR JSON）",
     },
     options: {
       task_type: {
         T2VA: "纯文字生视频",
-        I2VA: "参考图驱动",
-        FL2VA: "首帧锚定",
-        Ref2VA: "参考素材",
+        I2VA: "首帧图生视频（接 ImageToVideo first_frame）",
+        FL2VA: "首尾帧锚定（接 first_frame + last_frame）",
+        L2VA: "尾帧锚定",
+        Ref2VA: "参考素材（ReferenceToVideo；不是首帧）",
       },
       rewrite_mode: {
         strict: "严格遵循",
@@ -49,8 +52,8 @@ const NODE_TRANSLATIONS = {
         creative: "创意发挥",
       },
       output_language: {
-        中文: "中文",
-        English: "English",
+        中文: "中文（实验；官方主体规范为英文）",
+        English: "English（推荐）",
       },
       lmstudio_after_use: {
         keep_loaded: "保持加载（默认）",
@@ -82,6 +85,29 @@ const NODE_TRANSLATIONS = {
       },
     },
   },
+  MiniMaxH3CompileValidate: {
+    title: "MiniMax H3 提示词编译与校验",
+    fields: {
+      prompt_or_ir: "H3 提示词或 Prompt IR JSON",
+      task_type: "任务类型",
+      duration_seconds: "目标时长（秒）",
+      fail_on_error: "发现错误时停止工作流",
+      final_prompt: "最终 H3 提示词",
+      validation_report: "确定性校验报告",
+      normalized_ir: "规范化 Prompt IR",
+      is_valid: "是否通过校验",
+    },
+    options: {
+      task_type: {
+        AUTO: "自动识别",
+        T2VA: "纯文字生视频",
+        I2VA: "首帧图生视频",
+        FL2VA: "首尾帧生视频",
+        L2VA: "尾帧图生视频",
+        Ref2VA: "参考素材生视频",
+      },
+    },
+  },
   MiniMaxH3PromptModuleLoader: {
     title: "MiniMax H3 提示词模块 (热加载, 实验)",
     fields: {
@@ -93,9 +119,10 @@ const NODE_TRANSLATIONS = {
       system_prompt_module: "提示词模块（接导演节点）",
       module_preview: "模块预览",
       module_diagnostics: "模块诊断",
+      module_manifest: "模块清单（接导演节点）",
     },
     options: {
-      scope: { 全部: "全部", T2VA: "T2VA", I2VA: "I2VA", FL2VA: "FL2VA", Ref2VA: "Ref2VA" },
+      scope: { 全部: "全部", T2VA: "T2VA", I2VA: "I2VA", FL2VA: "FL2VA", L2VA: "L2VA", Ref2VA: "Ref2VA" },
       "（无）": "（无）",
     },
   },
@@ -176,6 +203,7 @@ const NODE_TRANSLATIONS = {
       generation_height: "生成高度",
       generation_frames: "生成帧数",
       strict_mode: "危险处理",
+      ref_image_size: "官方参考图尺寸策略（用于估算）",
       reference_images: "参考图片",
       reference_video: "参考视频 / 图像序列",
       reference_audio: "参考音频",
@@ -186,6 +214,10 @@ const NODE_TRANSLATIONS = {
       strict_mode: {
         report_only: "只报告，不中断",
         raise_on_danger: "发现危险时停止工作流",
+      },
+      ref_image_size: {
+        match: "匹配生成画面面积（较快）",
+        max: "最大参考尺寸（身份更准、较慢）",
       },
     },
   },
@@ -448,11 +480,17 @@ function localizeNode(node, config, defaultTitles = []) {
     // Autogrow 编号端口：ref_image_0/ref_video_1/ref_video_audio_2/ref_audio_3
     // 显示为 1-based 编号（与提示词 <Picture i>/<Video k>/<Audio j> 一致），
     // 且 ref_video_audio_k 明确标注"配套同编号视频"。
-    const numberedMatch = String(slot.name || "").match(/^(ref_(?:image|video|video_audio|audio))_(\d+)$/)
+    const slotLeafName = String(slot.name || "").split(".").pop()
+    const numberedMatch = slotLeafName.match(/^(ref_(?:image|video|video_audio|audio))_(\d+)$/)
     if (numberedMatch) {
-      const base = config.fields?.[numberedMatch[1]]
+      const kind = numberedMatch[1]
+      const base = config.fields?.[kind]
       const n = Number(numberedMatch[2]) + 1
-      slot.label = `${base ?? numberedMatch[1]} ${n}`
+      if (kind === "ref_video_audio") {
+        slot.label = `参考视频端口 ${n} 的配套原声`
+      } else {
+        slot.label = `${base ?? kind}端口 ${n}`
+      }
       slot.localized_name = slot.label
       continue
     }

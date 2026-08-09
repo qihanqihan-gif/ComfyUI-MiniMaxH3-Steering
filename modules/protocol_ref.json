@@ -1,7 +1,12 @@
 {
   "id": "protocol_ref",
   "title_zh": "核心协议：六段式 Ref2VA（自动加载）",
-  "version": 1,
+  "version": 2,
   "scope": "Ref2VA",
-  "instructions": "【协议·自动加载，无需选择】输出必须遵循 MiniMax H3 官方 Ref2VA 六段式（固定顺序）：\n1. subject_definitions: 定义引用内容与标签。<Subject N> = 可复用可见内容；<Picture N> = 帧锚点；<Video N>/<Audio N> = 视频/音频资产。四类独立编号，跨段含义恒定。\n2. summary: 以 [任务类型] 开头（keyframe completion / reference generation / video editing / video continuation / audio reuse / audio reference，可 + 组合）。\n3. retention_analysis: 每标签一行（fully_preserved / partially_preserved / attribute_transfer / weak_reference；音频：fully_copy / partially_copy / reference / weak_reference）。\n4. detailed_description: 350-500 英文词，按播放顺序逐镜描述；风格总述句在 [Shot 1] 之前；正文插入标签于首次出现及作用点。\n5. overall_soundscape / 6. non_diegetic_music: 同三段式规则。\n参考图管身份（视觉通道），提示词管动作/时间线——不要重复描述参考图内容。"
+  "source": "MiniMax-H3 official skill: h3-prompt-writing-ref",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
+  "evidence_level": "official_protocol",
+  "features": ["ref_six_field_protocol", "reference_label_semantics", "retention_analysis", "speaker_ids", "native_audio"],
+  "conflicts": [],
+  "instructions": "【官方 Ref2VA 协议·自动加载】六个字段全部使用英文，并严格按顺序输出：subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music。\n1. subject_definitions：<Subject N> 定义跨镜复用的可见身份、物体、场景、风格或动作；<Picture N> 定义具体画面/构图锚点；<Video N> 与 <Audio N> 分别定义视频和音频资产。四类标签独立编号，含义全程不变。\n2. summary：以方括号任务类型开头，可组合 keyframe completion、reference generation、video editing、video continuation、audio reuse、audio reference，再用一段概括目标和引用关系。\n3. retention_analysis：每个实际使用的标签单独一行。视觉关系使用 fully_preserved / partially_preserved / attribute_transfer / weak_reference；音频使用 fully_copy / partially_copy / reference / weak_reference。这里禁止写 (S1)/(S2)。\n4. detailed_description：先用 1–2 句写视觉风格，再从 [Shot 1] 开始按播放顺序描述。生成类复杂任务通常可写约 350–500 英文词；简单任务、对白密集任务或视频编辑任务按需要缩短，不为凑字数重复引用清单。标签应出现在首次生效和关键作用点；第一次出现时建立必要特征，之后不要逐镜复述全部定义。\n5. 只有真实发声来源才分配稳定的 (S1)/(S2)。overall_soundscape 与 non_diegetic_music 遵循三段式声音规则。"
 }

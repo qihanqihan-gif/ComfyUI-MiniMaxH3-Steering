@@ -1,0 +1,12 @@
+{
+  "id": "product_identity_fidelity",
+  "title_zh": "产品身份与包装保持",
+  "version": 1,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "source": "MiniMax-H3 official reference semantics + brand/product fidelity heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
+  "evidence_level": "official_aligned",
+  "features": ["product_identity", "packaging", "logo", "visible_text", "material"],
+  "conflicts": [],
+  "instructions": "产品参考一致性策略。\n1. 将产品轮廓、尺寸比例、部件位置、材质、主配色、logo 和包装文字视为独立可检查的身份特征。\n2. Ref2VA 用对应 <Subject N> 保持跨镜产品身份，并用 <Picture N> 仅锚定确切构图；其他模式依赖输入帧，不虚构标签。\n3. 旋转、开合或使用演示时，说明哪些部件移动、哪些结构保持固定，防止产品变形或零件增减。\n4. 用户给定文字逐字保留；没有提供的参数、认证、卖点或包装小字不得编造。\n5. 高反光、透明或细小结构只选择当前镜头最重要的可见特征，避免同时要求不可能读清的全部细节。"
+}
