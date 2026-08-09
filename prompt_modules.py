@@ -42,9 +42,48 @@ def load_protocol(task_type: str) -> str:
         LOGGER.warning("MiniMax H3 PromptModuleLoader: 协议 %s 加载失败: %s", key, exc)
     return ""
 
-_PROMPT_MODULE_SCOPES = ["全部", "T2VA", "I2VA", "FL2VA", "Ref2VA"]
+_PROMPT_MODULE_SCOPES = ["全部", "T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"]
+_VALID_SCOPE_TOKENS = set(_PROMPT_MODULE_SCOPES)
 _PROMPT_MODULE_NONE = "（无）"
 _PROMPT_MODULE_MAX_CHARS = 6000
+_EVIDENCE_LABELS = {
+    "official_protocol": "官方协议",
+    "official_skill_adaptation": "官方 Skill 改编",
+    "official_aligned": "官方规则对齐",
+    "community_heuristic": "社区经验",
+    "experimental": "实验",
+}
+
+
+def _scope_tokens(value) -> set[str]:
+    raw = str(value or "全部")
+    return {item.strip() for item in raw.split(",") if item.strip()} or {"全部"}
+
+
+def _scope_matches(selected_scope: str, module_scope) -> bool:
+    selected = str(selected_scope or "全部").strip()
+    allowed = _scope_tokens(module_scope)
+    return selected == "全部" or "全部" in allowed or selected in allowed
+
+
+def _metadata_issues(module: dict) -> list[str]:
+    issues = []
+    if not str(module.get("source") or "").strip():
+        issues.append("缺少 source")
+    if not isinstance(module.get("features"), list) or not module.get("features"):
+        issues.append("features 必须是非空字符串数组")
+    evidence = str(module.get("evidence_level") or "").strip()
+    if evidence not in _EVIDENCE_LABELS:
+        issues.append(f"evidence_level 无效或缺失：{evidence or '空'}")
+    unknown_scopes = _scope_tokens(module.get("scope")) - _VALID_SCOPE_TOKENS
+    if unknown_scopes:
+        issues.append("scope 含未知值：" + ", ".join(sorted(unknown_scopes)))
+    conflicts = module.get("conflicts", [])
+    if conflicts is not None and not isinstance(conflicts, list):
+        issues.append("conflicts 必须是字符串数组")
+    elif isinstance(conflicts, list) and any(not isinstance(item, str) for item in conflicts):
+        issues.append("conflicts 必须是字符串数组")
+    return issues
 
 
 def _load_modules() -> list[dict]:
@@ -52,6 +91,7 @@ def _load_modules() -> list[dict]:
     modules: list[dict] = []
     if not os.path.isdir(_MODULES_DIR):
         return modules
+    seen_ids = set()
     for fname in sorted(os.listdir(_MODULES_DIR)):
         if not fname.endswith(".json"):
             continue
@@ -65,7 +105,14 @@ def _load_modules() -> list[dict]:
                     continue
                 if m["id"] in _PROTOCOL_IDS or m["id"] in _LEGACY_PROTOCOL_IDS:
                     continue  # 协议模块由导演节点自动加载，不列为可选模块
-                modules.append(m)
+                if m["id"] in seen_ids:
+                    LOGGER.warning("MiniMax H3 PromptModuleLoader: 重复模块 id=%s（%s 已跳过）", m["id"], fname)
+                    continue
+                seen_ids.add(m["id"])
+                item = dict(m)
+                item["_file"] = fname
+                item["_metadata_issues"] = _metadata_issues(item)
+                modules.append(item)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("MiniMax H3 PromptModuleLoader: 模块 %s 加载失败: %s", fname, exc)
     return modules
@@ -94,8 +141,8 @@ class MiniMaxH3PromptModuleLoader:
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("system_prompt_module", "module_preview", "module_diagnostics")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("system_prompt_module", "module_preview", "module_diagnostics", "module_manifest")
     FUNCTION = "load"
     CATEGORY = "MiniMax H3 Lab/Prompt"
 
@@ -109,19 +156,37 @@ class MiniMaxH3PromptModuleLoader:
         modules = _load_modules()
         by_title = {m["title_zh"]: m for m in modules}
         selected = []
+        issues = []
+        seen_ids = set()
         for title in (module_1, module_2, module_3):
             if title and title != _PROMPT_MODULE_NONE and title in by_title:
-                selected.append(by_title[title])
+                module = by_title[title]
+                if module["id"] in seen_ids:
+                    issues.append(f"重复选择已忽略：{module['title_zh']}")
+                    continue
+                seen_ids.add(module["id"])
+                selected.append(module)
+            elif title and title != _PROMPT_MODULE_NONE:
+                issues.append(f"找不到模块：{title}")
+
+        selected_ids = {m["id"] for m in selected}
+        for m in selected:
+            for conflict in m.get("conflicts") or []:
+                if conflict in selected_ids:
+                    issues.append(f"模块冲突：{m['id']} ↔ {conflict}")
+            issues.extend(f"{m['id']}: {item}" for item in m.get("_metadata_issues", []))
 
         sections = []
         for m in selected:
             scope_note = ""
-            m_scope = str(m.get("scope") or "")
-            # 「全部」= 通配（策略模块默认）；节点 scope 或模块 scope 任一为「全部」即匹配
-            if scope != "全部" and m_scope and m_scope != "全部" and scope not in m_scope:
-                scope_note = f"（注意：本模块 scope={m_scope}，与当前 {scope} 不完全匹配）"
+            m_scope = str(m.get("scope") or "全部")
+            if not _scope_matches(scope, m_scope):
+                scope_note = f"（注意：本模块 scope={m_scope}，与当前 {scope} 不匹配）"
+                issues.append(f"作用域不匹配：{m['title_zh']} 适用 {m_scope}，当前 {scope}")
+            evidence = str(m.get("evidence_level") or "experimental")
             sections.append(
-                f"[{m['id']} | {m['title_zh']} | v{m.get('version', 1)}]{scope_note}\n{m['instructions']}"
+                f"[{m['id']} | {m['title_zh']} | v{m.get('version', 1)} | "
+                f"{_EVIDENCE_LABELS.get(evidence, '未分级')}]{scope_note}\n{m['instructions']}"
             )
         custom = (custom_instructions or "").strip()
         if custom:
@@ -129,15 +194,39 @@ class MiniMaxH3PromptModuleLoader:
         merged = "\n\n".join(sections)
         if len(merged) > _PROMPT_MODULE_MAX_CHARS:
             merged = merged[:_PROMPT_MODULE_MAX_CHARS] + "\n（合并文本过长已截断）"
+            issues.append("合并文本超过 6000 字符，末尾已截断")
 
         preview_lines = [
-            f"[{i + 1}] {m['title_zh']}（v{m.get('version', 1)}，scope={m.get('scope') or '全部'}）"
+            f"[{i + 1}] {m['title_zh']}（{_EVIDENCE_LABELS.get(m.get('evidence_level'), '未分级')}，"
+            f"scope={m.get('scope') or '全部'}）"
             for i, m in enumerate(selected)
         ]
         if custom:
-            preview_lines.append("[3+] workflow_custom（当前工作流自定义）")
-        diag = f"模块文件数={len(modules)}，已选={len(selected)}，合并字符={len(merged)}"
-        return (merged, "\n".join(preview_lines) if preview_lines else "（未选择模块）", diag)
+            preview_lines.append("[自定义] workflow_custom（当前工作流规则，未做证据分级）")
+        diag_lines = [f"可选模块={len(modules)}，已选={len(selected)}，合并字符={len(merged)}"]
+        diag_lines.extend(f"[提示] {item}" for item in dict.fromkeys(issues))
+        manifest = {
+            "schema_version": "h3_prompt_modules/1.0",
+            "scope": scope,
+            "selected": [
+                {
+                    "id": m["id"], "title_zh": m["title_zh"],
+                    "version": m.get("version", 1), "scope": m.get("scope", "全部"),
+                    "evidence_level": m.get("evidence_level", "experimental"),
+                    "source": m.get("source", ""), "source_url": m.get("source_url", ""),
+                    "features": m.get("features", []),
+                }
+                for m in selected
+            ],
+            "custom_instructions": custom,
+            "issues": list(dict.fromkeys(issues)),
+        }
+        return (
+            merged,
+            "\n".join(preview_lines) if preview_lines else "（未选择模块）",
+            "\n".join(diag_lines),
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+        )
 
 
 NODE_CLASS_MAPPINGS = {

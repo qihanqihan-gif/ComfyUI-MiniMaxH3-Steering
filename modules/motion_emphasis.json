@@ -1,7 +1,12 @@
 {
   "id": "motion_emphasis",
   "title_zh": "动作强化",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "创作策略：动作/打斗/舞蹈场景——\n1. 一个主动作 + 明确起止帧：写明动作的起始姿态、发力瞬间、结束落点。\n2. 用「速度感」词汇：swift / powerful / fluid / weightless，避免笼统的 moves。\n3. 镜头配合动作：动作快 → 手持/跟拍；动作慢 → 长焦/环绕。\n4. 冲击细节：布料/头发/尘土随动作反应（secondary motion）。\n5. 负面约束：no physics glitches, no morphing limbs。"
+  "source": "MiniMax-H3 official prompt guide motion/camera principles + project heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["action_beats", "secondary_motion", "camera_legibility", "contact_physics"],
+  "conflicts": [],
+  "instructions": "创作策略：动作、舞蹈或打斗场景。\n1. 写清起始姿态、动作路径、接触/发力瞬间和结束状态，优先保证一个主动作完整可读。\n2. 用具体速度、方向、重量和节奏代替笼统的 moves；身体接触要写明接触点和受力反馈。\n3. 根据动作可读性选择镜头：跟拍、手持、环绕、长焦或静止都可，不把动作速度机械绑定某一种运镜。\n4. 加入少量合理次级运动，如头发、衣料、尘土和道具惯性，但不喧宾夺主。\n5. 只在相关时加入防肢体融合、身份交换或穿模约束。"
 }

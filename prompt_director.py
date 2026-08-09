@@ -4,17 +4,18 @@
 职责边界（详见《H3顺序接口提示词节点设计方案-2026-08-05.md》）：
 - 文字 + 参考图（≤9）：走 OpenAI 兼容多模态 API，生成 H3 三段式提示词
 - 参考视频/音频：不传 API，用户直接接官方 ReferenceToVideo 端口（本地编码器消费）
-- 固定 9 个 ref_image 顺序接口（1-based，与 <Picture i> 一一对应，规避 Autogrow 乱序）
+- 固定 9 个 ref_image 物理接口；已连接素材再密集编号为 <Picture 1..N>，规避空端口与 Autogrow 乱序
 
 依赖：仅标准库（urllib/json/base64）+ torch/numpy/PIL（ComfyUI 自带），零第三方包。
-API Key 读取顺序：MINIMAX_H3_API_KEY > LINGBOT_API_KEY > OPENAI_API_KEY > 节点 api_key > 空串
-（空 key 不拦截：本地 OpenAI 兼容服务如 LM Studio 忽略鉴权，与 LingBot 行为一致）。
+API Key 读取顺序：节点 api_key > MINIMAX_H3_API_KEY > 与目标主机严格匹配的专用环境变量 > 空串。
+（空 key 不拦截：本地 OpenAI 兼容服务如 LM Studio 通常忽略鉴权。）
 """
 import base64
 import io
 import json
 import logging
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -64,8 +65,9 @@ _ENV_API_KEY = "MINIMAX_H3_API_KEY"
 
 _TASK_RULES = {
     "T2VA": "纯文字生视频：无参考图，直接按提示词创造画面。",
-    "I2VA": "参考图驱动：参考图是素材，可重新构图；用 <Picture i> 引用并描述其角色/场景/元素如何参与。",
-    "FL2VA": "首帧锚定：首帧是严格锚定（拉伸），提示词只描述运动与延续，不得要求改变画面构图。",
+    "I2VA": "首帧图生视频：<Picture 1> 是 0.00 秒首帧；保持身份、构图和场景锚点，再描述连续发展。",
+    "FL2VA": "首尾帧生视频：<Picture 1> 是首帧，<Picture 2> 是尾帧；描述两者之间可观察、连续的变化路径。",
+    "L2VA": "尾帧图生视频：<Picture 1> 是最终帧；推断合理前态并逐渐收束到该尾帧。",
     "Ref2VA": "参考素材：参考图是角色与场景参考，允许重新构图；用 <Picture i> 引用并明确'作为角色与场景参考'。",
 }
 
@@ -94,22 +96,34 @@ _REF_SHEET_SYSTEM_TEMPLATE = """你是参考素材分析器。逐图提取事实
 }}
 只输出 JSON，不要任何额外说明。"""
 
-_H3_SYSTEM_TEMPLATE = """你是 MiniMax H3 视频生成模型的提示词导演。你的任务是把用户的意图转成 H3 规范的三段式 JSON 提示词。
+_H3_SYSTEM_TEMPLATE = """你是 MiniMax H3 视频生成模型的提示词导演。你的任务是把用户意图规划成结构化 Prompt IR；最终字段顺序与格式由本地 Python 编译器负责。
 
-输出必须是合法 JSON，结构如下：
-{{
-  "integrated_multimodal_description": "画面与动作的整体描述，必须使用 <Picture 1>..<Picture 9> 标签引用参考图",
-  "overall_soundscape": "环境声/音效描述（diegetic 声音，与画面同步）",
-  "non_diegetic_music": "配乐描述（非剧情内音乐，含风格/节奏/情绪）",
-  "shot_breakdown": [{{"start_s": 0.0, "end_s": 2.5, "description": "分镜描述"}}]
-}}
+输出必须是合法 JSON，且只能包含下面契约中的字段：
+{output_contract}
 
 规则：
-1. 总时长约 {duration}s，分 {shots} 个镜头；shot_breakdown 的区间必须连续覆盖全片。
+1. 总时长约 {duration}s，规划约 {shots} 个镜头；首镜使用 [Shot 1] 且不写时间戳，后续镜头使用 [Shot N] At MM:SS.mmm，时间严格递增且不超过总时长。
 2. {task_rule}
 3. 改写模式：{rewrite_mode_rule}
-4. 所有文本使用{language}输出。
-5. 只输出 JSON，不要输出任何额外说明。"""
+4. 字段名固定使用契约中的英文；描述正文使用{language}，用户原始对白、歌词和画面可见文字不得改写或翻译。
+5. 不要额外输出 Markdown、解释、字段外文本或重复的分镜数组。"""
+
+
+def _output_contract(task_type: str) -> str:
+    if str(task_type).upper() == "REF2VA":
+        return """{
+  "subject_definitions": "定义 <Subject N>/<Picture N>/<Video N>/<Audio N>",
+  "summary": "以 [任务类型] 开头的目标与素材关系摘要",
+  "retention_analysis": "逐标签说明保留、迁移或参考方式",
+  "detailed_description": "按播放顺序编排的 [Shot N] 详细描述",
+  "overall_soundscape": "环境声、动作声和非语言人声",
+  "non_diegetic_music": "仅观众可听的配乐；无配乐写 N/A"
+}"""
+    return """{
+  "integrated_multimodal_description": "按时间线编排的 [Shot N] 画面、动作、镜头、对白与剧情内声音",
+  "overall_soundscape": "环境声、动作声和非语言人声",
+  "non_diegetic_music": "仅观众可听的配乐；无配乐写 N/A"
+}"""
 
 
 def _image_tensor_to_data_url(image_tensor: torch.Tensor, max_side: int = 1024) -> str:
@@ -366,31 +380,13 @@ def _wait_for_free_vram(target_gb: float, timeout_s: int) -> str:
     return f"等待超时：空闲显存未达 {target_gb} GB"
 
 
-def _compose_enhanced(parsed) -> str:
-    """三段式 JSON → H3 提示词文本（拼接；缺字段/非 dict 时安全降级）。"""
+def _compose_enhanced(parsed, task_type="T2VA", duration_seconds=5.0) -> str:
+    """LLM JSON → 由 h3_compiler 确定性序列化的官方 H3 提示词。"""
     if not isinstance(parsed, dict):
         return ""
-    parts = []
-    desc = (parsed.get("integrated_multimodal_description") or "").strip()
-    sound = (parsed.get("overall_soundscape") or "").strip()
-    music = (parsed.get("non_diegetic_music") or "").strip()
-    if desc:
-        parts.append(desc)
-    if sound:
-        parts.append("环境声：" + sound)
-    if music:
-        parts.append("配乐：" + music)
-    shots = parsed.get("shot_breakdown")
-    if isinstance(shots, list) and shots:
-        lines = []
-        for s in shots:
-            if isinstance(s, dict) and s.get("description"):
-                start = s.get("start_s") or 0.0
-                end = s.get("end_s") or 0.0
-                lines.append(f"[{start}-{end}s] {s['description']}")
-        if lines:
-            parts.append("分镜：" + " ".join(lines))
-    return "\n".join(parts) if parts else ""
+    return _load_h3_compiler().compile_prompt_ir(
+        parsed, task_type=task_type, duration=duration_seconds,
+    )["prompt"]
 
 
 def _analyze_assets(base_url, key, model, images, temperature,
@@ -421,7 +417,7 @@ def _analyze_assets(base_url, key, model, images, temperature,
             return [], [f"素材 {idx} 分析失败，回退单次多图：{exc}"]
         if not isinstance(item, dict):
             return [], [f"素材 {idx} 分析输出非对象，回退单次多图"]
-        item.setdefault("asset_id", f"asset_{idx}")
+        item["asset_id"] = f"asset_{idx}"
         item["input_index"] = idx
         sheet_items.append(item)
     notes.append(f"逐素材分析 {len(images)} 张（每张 ≤{per_asset_tokens} token）")
@@ -438,7 +434,7 @@ class MiniMaxH3PromptDirector:
                 "duration_seconds": ("FLOAT", {"default": 5.0, "min": 4.0, "max": 15.0, "step": 0.5}),
                 "shot_count": ("INT", {"default": 0, "min": 0, "max": 20, "step": 1}),
                 "rewrite_mode": (list(_REWRITE_MODES), {"default": "balanced"}),
-                "output_language": (["中文", "English"], {"default": "中文"}),
+                "output_language": (["English", "中文"], {"default": "English"}),
                 "api_base_url": ("STRING", {"default": "http://127.0.0.1:1234/v1"}),
                 "api_model": (["auto"], {"default": "auto"}),
                 "api_key": ("STRING", {"default": "", "password": True}),
@@ -455,14 +451,19 @@ class MiniMaxH3PromptDirector:
                 "analysis_mode": (["auto", "single", "staged"], {"default": "auto"}),
             },
             "optional": {
-                **{f"ref_image_{i}": ("IMAGE", {"label": f"参考资产 {i}"}) for i in range(1, 10)},
+                **{
+                    f"ref_image_{i}": ("IMAGE", {"label": f"导演识图素材 {i}（不传给 H3）"})
+                    for i in range(1, 10)
+                },
                 # v0.2：可接提示词模块节点输出（可选，非空时并入 system）
                 "system_module": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
+                # 模块节点第 4 输出：只用于诊断/IR 追踪，不重复发送给 LLM
+                "module_manifest": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("enhanced_prompt", "report", "reference_sheet")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("enhanced_prompt", "report", "reference_sheet", "prompt_ir")
     FUNCTION = "direct"
     CATEGORY = "MiniMax H3 Lab/Prompt"
 
@@ -481,17 +482,59 @@ class MiniMaxH3PromptDirector:
                lmstudio_gpu_offload="auto", api_reasoning="auto", json_mode="auto_retry", **kwargs):
         t0 = time.time()
         lm_notes = []
+        module_notes = []
+        module_ids = []
 
-        def passthrough(reason: str):
+        manifest_text = str(kwargs.get("module_manifest") or "").strip()
+        if manifest_text:
+            try:
+                manifest = json.loads(manifest_text)
+                if not isinstance(manifest, dict):
+                    raise ValueError("顶层不是 JSON 对象")
+                module_ids = [
+                    str(item.get("id")) for item in manifest.get("selected", [])
+                    if isinstance(item, dict) and item.get("id")
+                ]
+                manifest_scope = str(manifest.get("scope") or "全部")
+                if manifest_scope != "全部" and manifest_scope.casefold() != str(task_type).casefold():
+                    module_notes.append(
+                        f"[模块警告] 模块作用域={manifest_scope}，但导演任务={task_type}；请确认下游官方节点类型。"
+                    )
+                for item in manifest.get("issues", [])[:5]:
+                    module_notes.append(f"[模块诊断] {item}")
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                module_notes.append(f"[模块警告] module_manifest 无法解析：{exc}")
+
+        if output_language != "English":
+            module_notes.append(
+                "[语言警告] 中文输出属于便捷实验模式；官方 H3 执行协议要求英文主体，建议正式生成使用 English。"
+            )
+
+        def passthrough(reason: str, api_called: bool = False,
+                        reference_sheet: str = "[]", prompt_ir: str = "{}"):
             """直通统一出口：日志 + report，方便用户在控制台看到跳过原因。"""
             LOGGER.warning("MiniMax H3 PromptDirector: %s——已直通原始提示词", reason)
-            return (prompt, f"[直通] {reason}\n已直通原始提示词（未调用 API）。", "[]")
-        # 收集参考图（固定顺序 1..9，跳过未连接端口）
+            call_note = "API 已调用但未得到可编译结果" if api_called else "未调用 API"
+            report = f"[直通] {reason}\n已直通原始提示词（{call_note}）。"
+            if module_notes:
+                report += "\n" + "\n".join(module_notes)
+            return (prompt, report,
+                    reference_sheet, prompt_ir)
+        # 收集参考图：按已连接素材密集编号，确保与官方动态端口的展示顺序一致。
         images = []
+        port_map = []
         for i in range(1, 10):
             img = kwargs.get(f"ref_image_{i}")
             if img is not None:
-                images.append((i, _image_tensor_to_data_url(img)))
+                ordinal = len(images) + 1
+                images.append((ordinal, _image_tensor_to_data_url(img)))
+                port_map.append((i, ordinal))
+
+        if len(images) > 1 and task_type != "Ref2VA":
+            module_notes.append(
+                f"[接线警告] 导演接入 {len(images)} 张分析图但任务={task_type}。这些图只供 LLM 识图；"
+                "若下游使用 MiniMaxH3ReferenceToVideo，应把任务改为 Ref2VA。"
+            )
 
         # v0.2：素材角色/别名参数已按用户反馈移除（自然语言描述即可）
         # v0.1：analysis_mode 解析（auto = 0-2 图 single、3-9 图 staged；旧值兼容映射）
@@ -503,16 +546,14 @@ class MiniMaxH3PromptDirector:
         else:  # auto
             staged = len(images) >= 3
 
-        # API Key：环境变量优先（与 LingBot 一致支持 OPENAI_API_KEY），节点内次之。
-        # 空 key 不拦截：本地 OpenAI 兼容服务（LM Studio 等）忽略 Authorization，
-        # 远程服务无 key 时由 401 走 API 失败直通分支。
-        key = (
-            os.environ.get(_ENV_API_KEY)
-            or os.environ.get("LINGBOT_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or api_key
-            or ""
-        )
+        # 显式节点 Key 优先，避免全局 OPENAI_API_KEY 被发往任意兼容端点。
+        from urllib.parse import urlparse
+        api_host = (urlparse(api_base_url).hostname or "").casefold()
+        key = str(api_key or "").strip() or os.environ.get(_ENV_API_KEY, "")
+        if not key and "lingbot" in api_host:
+            key = os.environ.get("LINGBOT_API_KEY", "")
+        if not key and api_host == "api.openai.com":
+            key = os.environ.get("OPENAI_API_KEY", "")
         if not key:
             LOGGER.info("MiniMax H3 PromptDirector: 未提供 API Key（按本地服务处理，LM Studio 等忽略鉴权）")
 
@@ -523,6 +564,7 @@ class MiniMaxH3PromptDirector:
             task_rule=_TASK_RULES[task_type],
             rewrite_mode_rule=_REWRITE_MODES[rewrite_mode],
             language=output_language,
+            output_contract=_output_contract(task_type),
         )
         # v0.1：协议自动注入（仅英文输出；Ref2VA→六段式，其余→三段式）+ 创作策略模块
         protocol = ""
@@ -549,6 +591,11 @@ class MiniMaxH3PromptDirector:
                 model = models[0]
                 LOGGER.warning("MiniMax H3 PromptDirector: 多个候选模型 %s，取第一个 %s", models, model)
 
+        # LM Studio 显式 GPU 放置必须发生在阶段一识图之前，保证整个请求链使用同一策略。
+        lm_root = _lmstudio_root(api_base_url)
+        if lmstudio_gpu_offload != "auto" and lm_root:
+            lm_notes.append(_lmstudio_load_gpu(lm_root, model, key, timeout_s, lmstudio_gpu_offload))
+
         # 消息构建：文本 + 参考内容（staged：逐素材分析摘要文本；否则多图直传）
         sheet_items, sheet_notes = [], []
         if staged and images:
@@ -561,9 +608,9 @@ class MiniMaxH3PromptDirector:
             for item in sheet_items:
                 user_content.append({
                     "type": "text",
-                    "text": f"素材 {item.get('input_index')} 分析摘要（角色={item.get('role')} 别名={item.get('alias') or '无'}）："
+                    "text": f"素材 {item.get('input_index')} 分析摘要："
                             + json.dumps({k: v for k, v in item.items()
-                                          if k not in ("input_index", "role", "alias")},
+                                          if k != "input_index"},
                                          ensure_ascii=False),
                 })
         else:
@@ -575,18 +622,18 @@ class MiniMaxH3PromptDirector:
             {"role": "user", "content": user_content},
         ]
 
-        # LM Studio 显式 GPU 放置（调用前，非 auto 时）
-        lm_root = _lmstudio_root(api_base_url)
-        if lmstudio_gpu_offload != "auto" and lm_root:
-            lm_notes.append(_lmstudio_load_gpu(lm_root, model, key, timeout_s, lmstudio_gpu_offload))
-
         try:
             raw = _call_chat(api_base_url, key, model, messages, temperature, max_tokens, timeout_s,
                              json_mode=json_mode, api_reasoning=api_reasoning)
             parsed = _parse_json_text(raw)
         except Exception as exc:  # noqa: BLE001
             LOGGER.error("MiniMax H3 PromptDirector: API/解析失败: %s", exc)
-            return passthrough(f"API/解析失败: {exc}")
+            if lmstudio_after_use != "keep_loaded" and lm_root:
+                try:
+                    _lmstudio_unload(lm_root, model, key, timeout_s)
+                except Exception as unload_exc:  # noqa: BLE001
+                    LOGGER.warning("MiniMax H3 PromptDirector: 失败清理时卸载异常: %s", unload_exc)
+            return passthrough(f"API/解析失败: {exc}", api_called=True)
 
         # LM Studio 跑完卸载（调用后，非 keep_loaded 时）
         if lmstudio_after_use != "keep_loaded" and lm_root:
@@ -598,36 +645,50 @@ class MiniMaxH3PromptDirector:
             if lmstudio_after_use == "unload_and_wait_for_vram":
                 lm_notes.append(_wait_for_free_vram(2.0, timeout_s))
 
-        enhanced = _compose_enhanced(parsed) or prompt
-        shots_out = len(parsed.get("shot_breakdown", [])) if isinstance(parsed, dict) else 0
+        try:
+            compiled = _load_h3_compiler().compile_prompt_ir(
+                parsed, task_type=task_type, duration=duration_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("MiniMax H3 PromptDirector: IR 编译失败: %s", exc)
+            return passthrough(f"IR 编译失败: {exc}", api_called=True)
+        enhanced = compiled["prompt"]
+        if module_ids:
+            compiled["ir"]["applied_modules"] = module_ids
+        ir_json = json.dumps(compiled["ir"], ensure_ascii=False, indent=2)
+        shots_out = compiled["validation"]["checks"]["shot_count"]
         # v0.2：Reference Sheet 输出（两阶段时含逐素材事实 JSON，否则空）
         if sheet_items:
             sheet_out = json.dumps({"assets": sheet_items}, ensure_ascii=False, indent=2)
         else:
             sheet_out = "[]"
+        if compiled["validation"]["errors"]:
+            short_errors = "；".join(compiled["validation"]["errors"][:5])
+            return passthrough(
+                f"Prompt IR 未通过确定性校验：{short_errors}", api_called=True,
+                reference_sheet=sheet_out, prompt_ir=ir_json,
+            )
         report = "\n".join([
             f"task_type={task_type} 模型={model}",
-            f"参考图={len(images)} 张（端口 {[i for i, _ in images]}）",
-            f"分析模式={'staged' if staged else 'single'}",
+            f"导演识图素材={len(images)} 张（仅发送给提示词 API；端口→标签 {port_map}）",
+            f"分析模式={'staged' if sheet_items else 'single'}",
+            f"已应用模块={module_ids or '无'}",
             *sheet_notes,
             f"分镜={shots_out} 段  API 耗时={time.time() - t0:.1f}s",
             *lm_notes,
-            "提示：参考视频/音频请直接接官方 ReferenceToVideo 的 ref_video/ref_audio 端口（本节点不处理）。",
+            *module_notes,
+            "提示：本节点的图片输入只供提示词 API 识图，不会给 H3 加条件；图片/视频/音频必须另接官方生成节点。",
         ])
         # v0.1：h3_compiler 接线——确定性校验（errors/warnings 进 report，不阻塞输出）
         try:
-            vres = _load_h3_compiler().validate_prompt(
-                enhanced, duration=duration_seconds,
-                check_fields=(output_language == "English"),
-            )
+            vres = compiled["validation"]
             if vres["errors"]:
                 report += "\n[校验错误] " + "；".join(vres["errors"][:5])
             if vres["warnings"]:
                 report += "\n[校验警告] " + "；".join(vres["warnings"][:5])
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("MiniMax H3 PromptDirector: 校验器异常（不阻塞）: %s", exc)
-        return (enhanced, report, sheet_out)
-        return (enhanced, report)
+        return (enhanced, report, sheet_out, ir_json)
 
 
 NODE_CLASS_MAPPINGS = {

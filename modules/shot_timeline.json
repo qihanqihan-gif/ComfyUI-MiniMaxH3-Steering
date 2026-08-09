@@ -1,7 +1,13 @@
 {
   "id": "shot_timeline",
   "title_zh": "时间码分镜规则",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "分镜与时间码规则（官方格式优先，社区实证为佐）：\n1. 官方镜头格式：[Shot 1] 首镜不写时间戳；后续 [Shot 2] At 00:03.500（MM:SS.mmm 格式，严格递增，不超总时长）。\n2. 社区段级格式（官方格式不适用时）：0-4s / 4-8s 分段，段区间连续覆盖全片、无空洞。\n3. 复杂镜头用逐秒指令（Per-Second Directives）：每段覆盖 动作姿态表情 / 运镜 / 空间位置 / 音频 cue / 与下一段交接 五要素。\n4. 切镜用语：cuts to / transitions to / changes to / switches to；仅用户明确要求才用 cross-dissolve / fade / wipe。\n5. 时间码是叙事与节奏锚点，不是剪辑级绝对帧锁定——不要承诺逐帧精确。\n6. 单镜不超过 15s；每镜重要角色不超过 3 个。"
+  "deprecated": true,
+  "source": "Superseded by protocol_base.json, protocol_ref.json and h3_compiler.py",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_protocol",
+  "features": ["legacy_alias"],
+  "conflicts": [],
+  "instructions": "【旧版兼容文件，不再列为可选模块】镜头格式由自动协议与 h3_compiler 统一处理：[Shot 1] 无时间戳，后续只使用 [Shot N] At MM:SS.mmm。"
 }

@@ -1,0 +1,12 @@
+{
+  "id": "natural_camera_follow",
+  "title_zh": "自然跟随运镜",
+  "version": 1,
+  "scope": "全部",
+  "source": "MiniMax-H3 official camera vocabulary + action-legibility heuristic",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["tracking", "camera_follow", "action_legibility", "framing"],
+  "conflicts": ["subtle_still_motion"],
+  "instructions": "自然跟随运镜策略。\n1. 先写主体的移动方向、速度和目标，再让镜头以 tracking、truck、pan 或轻微手持中的一种主要方式保持主体可读。\n2. 镜头不必完全粘住主体：允许小幅滞后、重新居中或短暂揭示环境，但不能无理由甩动。\n3. 用前景遮挡、地面参照物和背景视差表现位移，保持地平线、屏幕方向和人物位置连续。\n4. 只有快速动作确实需要时才增加抖动；对白、产品或细节展示优先降低运动幅度。\n5. 运镜结束时给出稳定构图或明确交接，不让镜头在片尾仍无目的漂移。"
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": "h3_regression_cases/1.0",
+  "baseline": {
+    "megapixels": 0.4,
+    "duration_seconds": 5.0,
+    "steps": 24,
+    "cache": "off",
+    "rule": "Fix seed and change one variable per A/B run."
+  },
+  "cases": [
+    {
+      "id": "T01_t2va_single_shot",
+      "task_type": "T2VA",
+      "modules": ["single_shot_continuity"],
+      "intent_zh": "一只陶瓷杯在木桌上被一只手缓慢转动半圈，镜头固定，杯底轻触桌面的摩擦声清晰可闻。",
+      "checks": ["single visible action", "no unexplained cut", "plausible contact sound"]
+    },
+    {
+      "id": "T02_i2va_hard_first_frame",
+      "task_type": "I2VA",
+      "modules": ["subtle_still_motion"],
+      "assets": ["first_frame"],
+      "intent_zh": "保持首帧构图和机位，人物只自然眨眼一次并轻微呼吸，发丝低幅随风摆动。",
+      "checks": ["frame zero matches input", "static camera", "only requested micro-motion"]
+    },
+    {
+      "id": "T03_fl2va_transition",
+      "task_type": "FL2VA",
+      "modules": [],
+      "assets": ["first_frame", "last_frame"],
+      "intent_zh": "主体从首帧姿势平稳过渡到尾帧姿势，空间、服装和光线连续，不切镜。",
+      "checks": ["both keyframes align", "continuous transition", "no identity drift"]
+    },
+    {
+      "id": "T04_ref2va_composition_identity",
+      "task_type": "Ref2VA",
+      "modules": ["storyboard_reference_map", "anime_identity"],
+      "assets": ["picture_composition", "picture_character_identity"],
+      "intent_zh": "以图1作为空间与构图参考，以图2作为人物身份和服装参考，人物在该场景中保持固定机位做细微动作。",
+      "checks": ["composition is referenced", "identity comes from second image", "do not require exact frame-zero copy"]
+    },
+    {
+      "id": "T05_ref2va_two_people",
+      "task_type": "Ref2VA",
+      "modules": ["two_person_interaction"],
+      "assets": ["picture_person_a", "picture_person_b"],
+      "intent_zh": "两人面对面交换一个小盒子，先由左侧人物双手递出，再由右侧人物接住，机位稳定。",
+      "checks": ["no identity swap", "no body merge", "contact order is readable"]
+    },
+    {
+      "id": "T06_dialogue",
+      "task_type": "T2VA",
+      "modules": ["dialogue_performance"],
+      "intent_zh": "一名人物看向镜头，用中文说：测试完成。说完后嘴唇闭合并轻轻点头。",
+      "checks": ["verbatim dialogue", "only speaker moves lips", "speech and gesture timing"]
+    }
+  ]
+}

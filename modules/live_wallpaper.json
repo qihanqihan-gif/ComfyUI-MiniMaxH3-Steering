@@ -1,8 +1,12 @@
 {
   "id": "live_wallpaper",
   "title_zh": "动态壁纸（无缝循环）",
-  "version": 1,
-  "scope": "I2VA,FL2VA",
-  "source": "社区壁纸类条目 + 官方循环要点",
-  "instructions": "图生视频通用模板：动态壁纸——\n1. 首尾闭环：首帧与尾帧状态完全一致（同构图/同光照/同姿态），循环无缝。\n2. 运动：慢速氛围动效（云漂/水波/粒子/光晕缓动），节奏舒缓（slow gentle motion）。\n3. 画幅：默认竖屏 9:16（手机壁纸），构图留呼吸感。\n4. 单镜无切（no cuts），适合长时间循环观看。\n5. 负面：no jump cut, no visible loop seam, no harsh motion, no flickering light。"
+  "version": 2,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "source": "Community live-wallpaper recipe aligned with official shot syntax",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["live_wallpaper", "ambient_motion", "seamless_loop"],
+  "conflicts": ["storyboard_reference_map"],
+  "instructions": "图生视频模板：动态壁纸。\n1. 尊重工作流给定的宽高比和时长，不默认改成竖屏；让主要主体远离容易被系统 UI 遮挡的边缘区域。\n2. 选择 1–3 个低幅度、不同速度的氛围运动，如发丝、云、水波、粒子或光影缓动；主体身份和构图保持稳定。\n3. 默认单镜无切。需要循环时描述可见状态和速度如何自然回到开头，而不是只写 seamless。\n4. FL2VA 可在首尾图确实兼容时强化闭环；只有一张参考图时不要宣称精确尾帧锁定。\n5. 防止突然切镜、光照闪烁、明显循环接缝和无关的大幅动作。"
 }

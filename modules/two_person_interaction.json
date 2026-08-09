@@ -1,7 +1,12 @@
 {
   "id": "two_person_interaction",
   "title_zh": "双人互动",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
-  "instructions": "创作策略：双人/多人互动场景——\n1. 每人独立 (S1)/(S2) 说话人 ID，绑定到各自 <Subject N>，全程不交换。\n2. 写清空间关系（站位/距离/朝向/视线交互），防止角色融合或穿模。\n3. 身体接触（牵手/拥抱/搀扶）写明接触点与受力方向。\n4. 负面约束：no character swapping, no merged bodies（多人场景必带）。"
+  "source": "MiniMax-H3 official speaker-ID and reference-subject rules + project multi-person heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
+  "evidence_level": "official_aligned",
+  "features": ["multi_person", "spatial_blocking", "contact_physics", "speaker_ids"],
+  "conflicts": [],
+  "instructions": "双人或多人互动策略。\n1. 先建立清楚的空间阻挡：每人的左右/前后位置、朝向、距离、视线对象和移动路径。\n2. 只有实际说话、唱歌或发出可区分人声的角色才分配 (S1)/(S2)，同一发声者全片保持同一 ID；沉默角色不需要说话人编号。\n3. Ref2VA 中人物身份绑定各自 <Subject N>；其他模式不要凭空添加引用标签。\n4. 牵手、拥抱、搀扶或对打要写清接触部位、先后次序和受力反馈。\n5. 仅在风险相关时加入身份交换、身体融合、穿插或视线错配约束，避免无条件堆叠负面词。"
 }

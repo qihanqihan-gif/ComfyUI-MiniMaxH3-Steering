@@ -1,0 +1,12 @@
+{
+  "id": "dialogue_performance",
+  "title_zh": "对白表演与口型",
+  "version": 1,
+  "scope": "全部",
+  "source": "MiniMax-H3 official dialogue, speaker-ID and native-audio rules",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["dialogue", "speaker_ids", "lip_sync", "performance_beats"],
+  "conflicts": [],
+  "instructions": "对白表演策略。\n1. 用户提供的对白逐字保留原语言，不翻译、不润色；为每个真实发声者分配稳定的 (S1)/(S2)。\n2. 在时间线上写清谁开始说话、停顿、重音和结束，并给说话者可见的口型、视线、表情与手势变化。\n3. 未发声角色保持自然聆听反应；画外旁白期间，画面中可见人物的嘴唇保持闭合。\n4. 多人轮流说话时避免重叠，除非用户明确要求打断或合唱；跨镜延续对白时明确声音连续。\n5. 不在 retention_analysis 中写说话人 ID，也不为沉默人物创建 ID。"
+}

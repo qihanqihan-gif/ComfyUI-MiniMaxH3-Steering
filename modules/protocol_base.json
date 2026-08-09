@@ -1,7 +1,12 @@
 {
   "id": "protocol_base",
   "title_zh": "核心协议：三段式（自动加载）",
-  "version": 1,
-  "scope": "T2VA,I2VA,FL2VA",
-  "instructions": "【协议·自动加载，无需选择】输出必须遵循 MiniMax H3 官方三段式结构（字段名与顺序严格）：\n1. integrated_multimodal_description: 沿时间线的画面/动作/镜头/说话人/对白/剧情声主字段。镜头用 [Shot N] 标记：首镜不写时间戳，后续镜头写 [Shot N] At MM:SS.mmm（严格递增，不超过总时长）。开头先写风格总述句（Cinematic / live-action / 2D-animated / 3D CG 等）。\n2. overall_soundscape: 全程环境声/动作声/非语言人声概括（1-4 句一段；完全静音才写 N/A）。\n3. non_diegetic_music: 仅观众可听的配乐（1-3 句，写乐器/速度/节奏/动态，禁用抽象情绪词；禁 BGM 时写 N/A）。\n运镜：类型（Zoom/Push/Pan/Truck/Tilt/Pedestal/Arc/Tracking/Static/Shake/POV/Roll）+ 幅度 + 速度，自然融入英文句子。\n说话人稳定 ID (S1)(S2)；画外旁白注明 lips remain completely closed。\n正文用英文，对白/歌词/屏幕文字保留原语言。"
+  "version": 2,
+  "scope": "T2VA,I2VA,FL2VA,L2VA",
+  "source": "MiniMax-H3 official skill: h3-prompt-writing",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_protocol",
+  "features": ["base_three_field_protocol", "official_shot_timestamps", "speaker_ids", "native_audio"],
+  "conflicts": [],
+  "instructions": "【官方协议·自动加载】只输出并严格按顺序填写三个字段：integrated_multimodal_description、overall_soundscape、non_diegetic_music。\n1. 主字段必须用英文按播放顺序描述风格、主体、动作、构图、镜头和剧情内声音；对白、歌词与可见文字逐字保留用户提供的原语言，不翻译、不改写。\n2. 在首镜前用 1–2 句给出全片视觉风格。[Shot 1] 不写时间；仅从第二镜起使用精确格式 [Shot N] At MM:SS.mmm，时间严格递增且不得超过总时长。\n3. 运镜必须服务于动作和可读性。只有幅度或速度确实重要时，才补充 small/large amplitude 或 slow/fast speed；不要机械堆叠镜头术语。\n4. (S1)、(S2) 只分配给真正发声的角色，并保持全片稳定。画外旁白期间若画面人物可见，明确其嘴唇保持闭合。\n5. overall_soundscape 用 1–4 句概括环境声、动作声和非语言人声；真正完全静音才写 N/A。non_diegetic_music 用 1–3 句写观众可听的配乐；不需要配乐时写 N/A。\n6. I2VA/FL2VA/L2VA 的首尾帧对齐句由编译器统一加入，不在模块内重复或自行创造格式。"
 }

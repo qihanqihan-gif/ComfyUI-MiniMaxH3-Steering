@@ -1,8 +1,12 @@
 {
   "id": "scene_papercraft_stopmotion",
   "title_zh": "纸艺定格动画讲解",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
   "source": "官方 skill: papercraft-stop-motion-explainer",
-  "instructions": "场景配方（官方纸艺定格讲解 skill 浓缩）：\n1. 视觉语言：手工纸艺质感——剪纸/立体书/分层 diorama/微缩模型定格动画，纸纹理与手工痕迹可见。\n2. 内容：科学/教育/通识讲解，先定学习目标 → 设计视觉隐喻 → 纸角色/分层场景/道具设计。\n3. 动画：纸片逐帧位移（定格感）、镜头运动（纸面推近/转场翻页）、转场与声音设计（纸摩擦声/翻页声）。\n4. 负面约束：no standard 2D cartoons, no line doodles, no live action, no 无纸艺质感的普通动画。"
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["papercraft", "stop_motion", "educational_metaphor", "tactile_sound"],
+  "conflicts": ["scene_paper_collage"],
+  "instructions": "官方纸艺定格讲解 skill 的单条 H3 提示词改编。\n1. 围绕一个学习目标选择剪纸、立体书、分层 diorama 或微缩纸模型，并让纸纹、折痕、切边和手工误差可见。\n2. 用一个纸艺视觉隐喻解释核心关系，安排有限的逐帧位移、翻页或场景展开。\n3. 镜头运动保持克制，避免抹掉定格感；纸摩擦、翻页和小道具碰撞声与动作同步。\n4. 旁白和可见文字只使用用户提供内容，不编造科学结论。\n5. 防止材质漂移为实拍人物、普通平面卡通或无纸质细节的光滑动画。"
 }
