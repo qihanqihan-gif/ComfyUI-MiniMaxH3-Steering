@@ -13,15 +13,20 @@ const NODE_TRANSLATIONS = {
       output_language: "输出语言",
       api_base_url: "API 地址",
       api_model: "模型 ID",
-      api_key: "API 密钥",
+      api_key: "API 密钥（推荐留空，改用环境变量）",
       temperature: "温度",
-      max_tokens: "最大令牌数",
+      max_tokens: "最大生成令牌数（最高 131072）",
       timeout_s: "超时（秒）",
       lmstudio_after_use: "跑完后 LM Studio 模型处理",
       lmstudio_gpu_offload: "LM Studio GPU 加载策略",
       api_reasoning: "模型思考",
       json_mode: "JSON 模式",
       analysis_mode: "视觉分析模式",
+      model_profile: "多模态模型兼容配置",
+      frame_sequence_limit: "API 最多发送序列帧数",
+      frame_selection_mode: "序列帧快捷选择方式",
+      frame_selection_spec: "自定义帧序号 / 百分比",
+      api_failure_policy: "API / JSON 失败策略",
       ref_image_1: "导演识图素材 1（不传给 H3）",
       ref_image_2: "导演识图素材 2（不传给 H3）",
       ref_image_3: "导演识图素材 3（不传给 H3）",
@@ -31,6 +36,7 @@ const NODE_TRANSLATIONS = {
       ref_image_7: "导演识图素材 7（不传给 H3）",
       ref_image_8: "导演识图素材 8（不传给 H3）",
       ref_image_9: "导演识图素材 9（不传给 H3）",
+      video_frame_sequence: "参考视频抽帧 / 图像序列（批次，仅供 API）",
       system_module: "提示词模块（接模块节点）",
       module_manifest: "模块清单（接模块节点第 4 输出）",
       enhanced_prompt: "增强后提示词（接官方节点 prompt）",
@@ -50,6 +56,7 @@ const NODE_TRANSLATIONS = {
         strict: "严格遵循",
         balanced: "平衡",
         creative: "创意发挥",
+        transcribe: "忠实转译（不扩写）",
       },
       output_language: {
         中文: "中文（实验；官方主体规范为英文）",
@@ -69,7 +76,7 @@ const NODE_TRANSLATIONS = {
         off: "关闭（CPU）",
       },
       api_reasoning: {
-        auto: "自动（默认）",
+        auto: "自动（Qwen/Gemma 分阶段；DeepSeek 低思考）",
         off: "关闭思考",
         on: "开启思考",
       },
@@ -79,9 +86,103 @@ const NODE_TRANSLATIONS = {
         off: "关闭（纯文本）",
       },
       analysis_mode: {
-        auto: "自动（1-2 图单次，3-9 图分阶段，推荐）",
-        single: "单次（多图直传）",
-        staged: "分阶段（逐素材分析+合并）",
+        auto: "自动（DeepSeek 视频帧同次联合；本地模型按素材数分阶段）",
+        single: "单次（参考图 + 视频帧同次直传）",
+        staged: "分阶段（保留给同素材 A/B）",
+      },
+      model_profile: {
+        auto: "自动识别模型（默认）",
+        gemma: "Gemma",
+        qwen: "Qwen",
+        cloud: "云端兼容模式",
+        qwen3_8: "Qwen3.8（紧凑结构化输出）",
+        deepseek_vision: "DeepSeek Vision（连续帧联合理解）",
+      },
+      frame_selection_mode: {
+        uniform_full: "均匀全程（包含首尾，默认）",
+        uniform_no_edges: "均匀避开首尾（约 10%–90%）",
+        custom_indices: "自定义帧序号（支持 -1=最后一帧）",
+        custom_percent: "自定义百分比（0–100）",
+      },
+      api_failure_policy: {
+        stop: "停止工作流（默认，防止原提示词误直通）",
+        passthrough: "直通原提示词（旧行为）",
+      },
+    },
+  },
+  MiniMaxH3CloudDirector: {
+    title: "MiniMax H3 云端多模态导演",
+    fields: {
+      prompt: "用户意图（描述视频、素材分工与保留/替换规则）",
+      task_type: "任务类型",
+      duration_seconds: "时长（秒）",
+      shot_count: "分镜数（0=自动）",
+      rewrite_mode: "改写模式",
+      output_language: "输出语言",
+      cloud_provider: "云端连接 / 兼容预设",
+      api_model: "模型 ID 覆盖（留空使用预设）",
+      temperature: "生成温度（预设可按供应商忽略）",
+      max_tokens: "Prompt IR 最大输出令牌",
+      timeout_s: "单次调用超时（秒）",
+      api_reasoning: "思考强度（由云端预设转译）",
+      analysis_mode: "参考图与视频帧的上传方式",
+      frame_sequence_limit: "参考视频最多上传帧数",
+      frame_selection_mode: "参考视频选帧方式",
+      frame_selection_spec: "自定义帧序号 / 百分比",
+      ref_image_1: "参考图 1（按连接顺序编号；仅供 API）",
+      ref_image_2: "参考图 2（按连接顺序编号；仅供 API）",
+      ref_image_3: "参考图 3（按连接顺序编号；仅供 API）",
+      ref_image_4: "参考图 4（按连接顺序编号；仅供 API）",
+      ref_image_5: "参考图 5（按连接顺序编号；仅供 API）",
+      ref_image_6: "参考图 6（按连接顺序编号；仅供 API）",
+      ref_image_7: "参考图 7（按连接顺序编号；仅供 API）",
+      ref_image_8: "参考图 8（按连接顺序编号；仅供 API）",
+      ref_image_9: "参考图 9（按连接顺序编号；仅供 API）",
+      video_frame_sequence: "参考视频帧 / 图像序列（同一 <Video 1> 时间线；仅供 API）",
+      system_module: "提示词模块（接模块节点）",
+      module_manifest: "模块清单（接模块节点第 4 输出）",
+      enhanced_prompt: "增强后提示词（接官方节点 prompt）",
+      report: "云端调用与校验报告",
+      reference_sheet: "参考素材分析表（JSON）",
+      prompt_ir: "提示词中间表示（Prompt IR JSON）",
+    },
+    options: {
+      task_type: {
+        T2VA: "纯文字生视频",
+        I2VA: "首帧图生视频（接 ImageToVideo first_frame）",
+        FL2VA: "首尾帧锚定（接 first_frame + last_frame）",
+        L2VA: "尾帧锚定",
+        Ref2VA: "参考素材（ReferenceToVideo；不是首帧）",
+      },
+      rewrite_mode: {
+        strict: "严格遵循",
+        balanced: "平衡",
+        creative: "创意发挥",
+        transcribe: "忠实转译（不扩写）",
+      },
+      output_language: {
+        中文: "中文（实验；官方主体规范为英文）",
+        English: "English（推荐）",
+      },
+      cloud_provider: {
+        deepseek: "DeepSeek · 连续帧联合理解（实验）",
+        gemini: "Gemini · 原生多模态（G0 抽帧）",
+      },
+      api_reasoning: {
+        auto: "自动（由连接预设决定）",
+        off: "关闭思考",
+        on: "开启较高思考",
+      },
+      analysis_mode: {
+        auto: "自动（有视频帧时与参考图联合上传）",
+        single: "联合上传（参考图 + 所选视频帧同次发送）",
+        staged: "分阶段上传（分别分析后汇总，用于 A/B）",
+      },
+      frame_selection_mode: {
+        uniform_full: "均匀全程（包含首尾，默认）",
+        uniform_no_edges: "均匀避开首尾（约 10%–90%）",
+        custom_indices: "自定义帧序号（支持 -1=最后一帧）",
+        custom_percent: "自定义百分比（0–100）",
       },
     },
   },
@@ -124,6 +225,21 @@ const NODE_TRANSLATIONS = {
     options: {
       scope: { 全部: "全部", T2VA: "T2VA", I2VA: "I2VA", FL2VA: "FL2VA", L2VA: "L2VA", Ref2VA: "Ref2VA" },
       "（无）": "（无）",
+    },
+  },
+  MiniMaxH3ModuleFolderLoader: {
+    title: "MiniMax H3 模块文件夹加载器 (独立, 热加载)",
+    fields: {
+      module_file: "模块文件 1（按路径分类）",
+      module_file_2: "模块文件 2",
+      module_file_3: "模块文件 3",
+      module_file_4: "模块文件 4",
+      module_file_5: "模块文件 5",
+      system_prompt_module: "提示词模块（接导演节点）",
+      diagnostics: "加载诊断",
+    },
+    options: {
+      "（未选择）": "（未选择）",
     },
   },
   MiniMaxH3Steering: {
@@ -610,6 +726,524 @@ function installModelRefreshButton(nodeType) {
   }
 }
 
+const CLOUD_CREDENTIAL_PROVIDERS = {
+  deepseek: {
+    provider: "deepseek",
+    credentialId: "deepseek_default",
+    label: "DeepSeek",
+    defaultModel: "deepseek-v4-flash-vision-exp",
+    probeLabel: "模型列表鉴权探针（不生成内容）",
+  },
+  gemini: {
+    provider: "gemini",
+    credentialId: "gemini_default",
+    label: "Gemini",
+    defaultModel: "gemini-3.1-flash-lite",
+    probeLabel: "小图 + 严格 JSON 真实视觉探针",
+  },
+}
+
+function cloudCredentialConfig(provider) {
+  return CLOUD_CREDENTIAL_PROVIDERS[String(provider || "deepseek").toLowerCase()]
+    || CLOUD_CREDENTIAL_PROVIDERS.deepseek
+}
+
+function nodeCloudCredentialConfig(node) {
+  const widget = node?.widgets?.find((item) => item?.name === "cloud_provider")
+  return cloudCredentialConfig(widget?.value)
+}
+
+function nodeCloudModel(node, config) {
+  const widget = node?.widgets?.find((item) => item?.name === "api_model")
+  return String(widget?.value || "").trim() || config.defaultModel
+}
+
+function setCloudModelOverride(node, value) {
+  const widget = node?.widgets?.find((item) => item?.name === "api_model")
+  if (!widget) return false
+  widget.value = String(value || "")
+  node.graph?.change?.()
+  node.setDirtyCanvas?.(true, true)
+  return true
+}
+
+async function cloudCredentialRequest(path, options = {}) {
+  const response = await api.fetchApi(path, options)
+  let payload = {}
+  try {
+    payload = await response.json()
+  } catch (_) {
+    payload = {}
+  }
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `HTTP ${response.status}`)
+  }
+  return payload
+}
+
+async function fetchCloudCredentialStatus(config) {
+  const query = new URLSearchParams({
+    provider: config.provider,
+    credential_id: config.credentialId,
+  })
+  const payload = await cloudCredentialRequest(`/minimaxh3lab/cloud/credential/status?${query}`)
+  return payload.status || {}
+}
+
+function createCloudModelPicker(node, config, onModelCountChanged) {
+  const overlay = document.createElement("div")
+  Object.assign(overlay.style, {
+    position: "fixed", inset: "0", zIndex: "100000", background: "rgba(0,0,0,.62)",
+    display: "flex", alignItems: "center", justifyContent: "center", padding: "24px",
+  })
+  const panel = document.createElement("div")
+  Object.assign(panel.style, {
+    width: "min(760px, 94vw)", maxHeight: "90vh", overflow: "auto",
+    background: "#202124", color: "#eee", border: "1px solid #505157",
+    borderRadius: "12px", boxShadow: "0 18px 60px rgba(0,0,0,.55)", padding: "22px",
+    fontFamily: "system-ui, sans-serif",
+  })
+  overlay.appendChild(panel)
+
+  const titleRow = document.createElement("div")
+  Object.assign(titleRow.style, { display: "flex", alignItems: "center", gap: "12px" })
+  const title = document.createElement("h2")
+  title.textContent = `选择 ${config.label} 模型`
+  Object.assign(title.style, { margin: "0", flex: "1", fontSize: "20px" })
+  const close = document.createElement("button")
+  close.textContent = "×"
+  Object.assign(close.style, {
+    width: "36px", height: "36px", border: "0", borderRadius: "8px",
+    background: "#34363b", color: "#fff", fontSize: "24px", cursor: "pointer",
+  })
+  titleRow.append(title, close)
+  panel.appendChild(titleRow)
+
+  const summary = document.createElement("p")
+  summary.textContent = `当前：${nodeCloudModel(node, config)}；预设默认：${config.defaultModel}`
+  Object.assign(summary.style, { color: "#b7bac3", margin: "8px 0 14px" })
+  panel.appendChild(summary)
+
+  const filters = document.createElement("div")
+  Object.assign(filters.style, { display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" })
+  const search = document.createElement("input")
+  search.type = "search"
+  search.placeholder = "搜索模型 ID / 显示名称"
+  Object.assign(search.style, {
+    flex: "1", minWidth: "260px", padding: "9px 11px", borderRadius: "7px",
+    border: "1px solid #5b5e66", background: "#17181b", color: "#fff",
+  })
+  const recommendedLabel = document.createElement("label")
+  Object.assign(recommendedLabel.style, { display: "flex", alignItems: "center", gap: "6px" })
+  const recommendedOnly = document.createElement("input")
+  recommendedOnly.type = "checkbox"
+  recommendedOnly.checked = true
+  recommendedLabel.append(recommendedOnly, document.createTextNode("优先只看 Director 候选"))
+  filters.append(search, recommendedLabel)
+  panel.appendChild(filters)
+
+  const select = document.createElement("select")
+  select.size = 14
+  Object.assign(select.style, {
+    width: "100%", marginTop: "12px", minHeight: "320px", padding: "7px",
+    borderRadius: "8px", border: "1px solid #5b5e66", background: "#17181b",
+    color: "#fff", fontFamily: "ui-monospace, Consolas, monospace", fontSize: "13px",
+  })
+  panel.appendChild(select)
+
+  const feedback = document.createElement("div")
+  Object.assign(feedback.style, { minHeight: "24px", margin: "10px 0", color: "#b9dcff" })
+  panel.appendChild(feedback)
+  const note = document.createElement("p")
+  note.textContent = "模型出现在供应商列表，只代表当前账户可见；★ 表示适合文本 Prompt IR 的候选，不等于已经完成本插件的多图/严格 JSON 实测。"
+  Object.assign(note.style, { color: "#e9bd73", fontSize: "13px", lineHeight: "1.55" })
+  panel.appendChild(note)
+
+  const actions = document.createElement("div")
+  Object.assign(actions.style, { display: "flex", flexWrap: "wrap", gap: "9px" })
+  const makeButton = (text, background = "#3568d4") => {
+    const button = document.createElement("button")
+    button.textContent = text
+    Object.assign(button.style, {
+      padding: "9px 15px", border: "0", borderRadius: "7px", background,
+      color: "#fff", cursor: "pointer", fontWeight: "600",
+    })
+    actions.appendChild(button)
+    return button
+  }
+  const useSelected = makeButton("使用所选模型")
+  const usePreset = makeButton("恢复连接预设默认", "#6b5b95")
+  const refresh = makeButton("重新获取", "#3c7f62")
+  panel.appendChild(actions)
+
+  let models = []
+  const render = () => {
+    const query = String(search.value || "").trim().toLowerCase()
+    const current = nodeCloudModel(node, config)
+    const rows = models.filter((item) => {
+      if (recommendedOnly.checked && !item.recommended) return false
+      const haystack = `${item.id || ""} ${item.display_name || ""}`.toLowerCase()
+      return !query || haystack.includes(query)
+    })
+    select.replaceChildren()
+    for (const item of rows) {
+      const option = document.createElement("option")
+      option.value = item.id
+      const display = item.display_name && item.display_name !== item.id
+        ? ` — ${item.display_name}` : ""
+      const limits = item.input_token_limit
+        ? ` [in ${Number(item.input_token_limit).toLocaleString()}]` : ""
+      option.textContent = `${item.recommended ? "★ " : "  "}${item.id}${display}${limits}`
+      option.selected = item.id === current
+      select.appendChild(option)
+    }
+    feedback.textContent = `显示 ${rows.length} / ${models.length} 个模型`
+  }
+  const load = async () => {
+    refresh.disabled = true
+    useSelected.disabled = true
+    feedback.textContent = `正在通过本机后端获取 ${config.label} 模型列表…`
+    try {
+      const payload = await cloudCredentialRequest("/minimaxh3lab/cloud/models", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: config.provider,
+          credential_id: config.credentialId,
+          timeout_s: 30,
+        }),
+      })
+      models = Array.isArray(payload.models) ? payload.models.filter((item) => item?.id) : []
+      models.sort((left, right) => Number(Boolean(right.recommended)) - Number(Boolean(left.recommended))
+        || String(left.id).localeCompare(String(right.id)))
+      onModelCountChanged?.(models.length)
+      render()
+      if (!models.length) feedback.textContent = "供应商没有返回可用于 generateContent 的模型。"
+    } catch (error) {
+      models = []
+      select.replaceChildren()
+      feedback.textContent = `获取失败：${error?.message || error}`
+    } finally {
+      refresh.disabled = false
+      useSelected.disabled = false
+    }
+  }
+  search.oninput = render
+  recommendedOnly.onchange = render
+  select.ondblclick = () => useSelected.click()
+  useSelected.onclick = () => {
+    if (!select.value) {
+      feedback.textContent = "请先选择一个模型。"
+      return
+    }
+    setCloudModelOverride(node, select.value)
+    summary.textContent = `当前：${select.value}；预设默认：${config.defaultModel}`
+    feedback.textContent = `已写入模型覆盖：${select.value}`
+  }
+  usePreset.onclick = () => {
+    setCloudModelOverride(node, "")
+    summary.textContent = `当前：${config.defaultModel}（预设）；预设默认：${config.defaultModel}`
+    feedback.textContent = "已清空模型覆盖，运行时使用连接预设默认模型。"
+    render()
+  }
+  refresh.onclick = load
+  const dismiss = () => overlay.remove()
+  close.onclick = dismiss
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) dismiss()
+  })
+  document.body.appendChild(overlay)
+  search.focus()
+  load()
+}
+
+function credentialSourceLabel(source) {
+  const value = String(source || "")
+  if (value.startsWith("environment:")) return "环境变量"
+  if (value.startsWith("local_file:")) return "本地凭据文件"
+  return "未配置"
+}
+
+function createCloudCredentialModal(config, modelId, onStatusChanged) {
+  const overlay = document.createElement("div")
+  Object.assign(overlay.style, {
+    position: "fixed", inset: "0", zIndex: "100000", background: "rgba(0,0,0,.62)",
+    display: "flex", alignItems: "center", justifyContent: "center", padding: "24px",
+  })
+  const panel = document.createElement("div")
+  Object.assign(panel.style, {
+    width: "min(680px, 94vw)", maxHeight: "90vh", overflow: "auto",
+    background: "#202124", color: "#eee", border: "1px solid #505157",
+    borderRadius: "12px", boxShadow: "0 18px 60px rgba(0,0,0,.55)", padding: "22px",
+    fontFamily: "system-ui, sans-serif",
+  })
+  overlay.appendChild(panel)
+
+  const titleRow = document.createElement("div")
+  Object.assign(titleRow.style, { display: "flex", alignItems: "center", gap: "12px" })
+  const title = document.createElement("h2")
+  title.textContent = "MiniMax H3 云端连接"
+  Object.assign(title.style, { margin: "0", flex: "1", fontSize: "20px" })
+  const close = document.createElement("button")
+  close.textContent = "×"
+  Object.assign(close.style, {
+    width: "36px", height: "36px", border: "0", borderRadius: "8px",
+    background: "#34363b", color: "#fff", fontSize: "24px", cursor: "pointer",
+  })
+  titleRow.append(title, close)
+  panel.appendChild(titleRow)
+
+  const subtitle = document.createElement("p")
+  subtitle.textContent = `${config.label} 官方 API · 凭据不会写入节点、工作流、history 或生成媒体元数据`
+  Object.assign(subtitle.style, { color: "#b7bac3", margin: "8px 0 18px" })
+  panel.appendChild(subtitle)
+
+  const statusBox = document.createElement("div")
+  Object.assign(statusBox.style, {
+    padding: "12px 14px", background: "#2a2c31", borderRadius: "8px", lineHeight: "1.65",
+    marginBottom: "16px", whiteSpace: "pre-wrap", wordBreak: "break-all",
+  })
+  panel.appendChild(statusBox)
+
+  const label = document.createElement("label")
+  label.textContent = `${config.label} API Key（留空不会改变已保存值）`
+  Object.assign(label.style, { display: "block", marginBottom: "7px", fontWeight: "600" })
+  panel.appendChild(label)
+
+  const inputRow = document.createElement("div")
+  Object.assign(inputRow.style, { display: "flex", gap: "8px" })
+  const keyInput = document.createElement("input")
+  keyInput.type = "password"
+  keyInput.autocomplete = "new-password"
+  keyInput.placeholder = "粘贴新的 Key；重新打开窗口时不会回填旧 Key"
+  Object.assign(keyInput.style, {
+    flex: "1", minWidth: "0", padding: "10px 12px", borderRadius: "7px",
+    border: "1px solid #5b5e66", background: "#17181b", color: "#fff",
+  })
+  const reveal = document.createElement("button")
+  reveal.textContent = "显示"
+  Object.assign(reveal.style, {
+    padding: "0 14px", borderRadius: "7px", border: "1px solid #5b5e66",
+    background: "#34363b", color: "#fff", cursor: "pointer",
+  })
+  inputRow.append(keyInput, reveal)
+  panel.appendChild(inputRow)
+
+  const warning = document.createElement("p")
+  warning.textContent = "本版按你的取舍使用本机明文 JSON。复制整个 ComfyUI/user 目录、让他人访问本机文件或开放 ComfyUI 服务时，凭据仍可能暴露。"
+  Object.assign(warning.style, { color: "#e9bd73", fontSize: "13px", lineHeight: "1.55" })
+  panel.appendChild(warning)
+
+  const feedback = document.createElement("div")
+  Object.assign(feedback.style, { minHeight: "24px", margin: "8px 0", color: "#b9dcff" })
+  panel.appendChild(feedback)
+
+  const actions = document.createElement("div")
+  Object.assign(actions.style, { display: "flex", flexWrap: "wrap", gap: "9px" })
+  const makeButton = (text, background = "#3568d4") => {
+    const button = document.createElement("button")
+    button.textContent = text
+    Object.assign(button.style, {
+      padding: "9px 15px", border: "0", borderRadius: "7px", background,
+      color: "#fff", cursor: "pointer", fontWeight: "600",
+    })
+    actions.appendChild(button)
+    return button
+  }
+  const save = makeButton("保存 / 替换")
+  const test = makeButton("测试已保存连接", "#3c7f62")
+  const clear = makeButton("清除本地 Key", "#984d4d")
+  panel.appendChild(actions)
+
+  let status = {}
+  const renderStatus = (nextStatus) => {
+    status = nextStatus || {}
+    const configured = status.configured ? "已配置" : "未配置"
+    const source = credentialSourceLabel(status.source)
+    statusBox.textContent = [
+      `状态：${configured}（${source}）`,
+      `本地存储：${status.storage_path || "等待后端返回"}`,
+      status.environment_configured
+        ? "环境变量优先：清除本地文件后，环境变量仍会继续生效。"
+        : "环境变量：未配置；保存后使用本地凭据文件。",
+    ].join("\n")
+    onStatusChanged?.(status)
+  }
+  const refresh = async () => {
+    feedback.textContent = "正在读取配置状态…"
+    try {
+      renderStatus(await fetchCloudCredentialStatus(config))
+      feedback.textContent = ""
+    } catch (error) {
+      feedback.textContent = `读取失败：${error?.message || error}`
+    }
+  }
+  const setBusy = (busy) => {
+    save.disabled = busy
+    test.disabled = busy
+    clear.disabled = busy
+  }
+
+  reveal.onclick = () => {
+    const show = keyInput.type === "password"
+    keyInput.type = show ? "text" : "password"
+    reveal.textContent = show ? "隐藏" : "显示"
+  }
+  save.onclick = async () => {
+    const apiKey = String(keyInput.value || "").trim()
+    if (!apiKey) {
+      feedback.textContent = "请输入新的 API Key；空值不会覆盖已保存凭据。"
+      return
+    }
+    setBusy(true)
+    feedback.textContent = "正在保存到本机用户配置…"
+    try {
+      const payload = await cloudCredentialRequest("/minimaxh3lab/cloud/credential/save", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: config.provider,
+          credential_id: config.credentialId,
+          api_key: apiKey,
+        }),
+      })
+      keyInput.value = ""
+      keyInput.type = "password"
+      reveal.textContent = "显示"
+      renderStatus(payload.status)
+      feedback.textContent = status.environment_configured
+        ? "已保存，但当前环境变量优先于本地 Key。"
+        : "已保存。Key 不会进入当前工作流。"
+    } catch (error) {
+      feedback.textContent = `保存失败：${error?.message || error}`
+    } finally {
+      setBusy(false)
+    }
+  }
+  clear.onclick = async () => {
+    if (!confirm(`清除本地保存的 ${config.label} Key？环境变量不会被删除。`)) return
+    setBusy(true)
+    feedback.textContent = "正在清除本地凭据…"
+    try {
+      const payload = await cloudCredentialRequest("/minimaxh3lab/cloud/credential/clear", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: config.provider, credential_id: config.credentialId }),
+      })
+      renderStatus(payload.status)
+      feedback.textContent = payload.status?.configured
+        ? "本地 Key 已清除；环境变量仍在生效。"
+        : "本地 Key 已清除。"
+    } catch (error) {
+      feedback.textContent = `清除失败：${error?.message || error}`
+    } finally {
+      setBusy(false)
+    }
+  }
+  test.onclick = async () => {
+    setBusy(true)
+    feedback.textContent = `正在执行 ${config.label}：${config.probeLabel}…`
+    try {
+      const payload = await cloudCredentialRequest("/minimaxh3lab/cloud/credential/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: config.provider,
+          credential_id: config.credentialId,
+          model_id: modelId,
+        }),
+      })
+      const probe = payload.vision_probe
+        ? `；视觉结构化探针：通过（${payload.probe_model || modelId}）`
+        : ""
+      feedback.textContent = `连接成功；凭据来源：${credentialSourceLabel(payload.source)}；模型数：${payload.model_count ?? 0}${probe}`
+      await refresh()
+    } catch (error) {
+      feedback.textContent = `连接测试失败：${error?.message || error}`
+    } finally {
+      setBusy(false)
+    }
+  }
+  const dismiss = () => overlay.remove()
+  close.onclick = dismiss
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) dismiss()
+  })
+  document.body.appendChild(overlay)
+  keyInput.focus()
+  refresh()
+}
+
+function installCloudCredentialButton(nodeType) {
+  if (nodeType.prototype.__minimaxH3CloudCredentialInstalled) return
+  nodeType.prototype.__minimaxH3CloudCredentialInstalled = true
+  const originalOnNodeCreated = nodeType.prototype.onNodeCreated
+  nodeType.prototype.onNodeCreated = function () {
+    const result = originalOnNodeCreated?.apply(this, arguments)
+    const node = this
+    const modelButton = node.addWidget("button", "🔄 刷新 / 选择云端模型", null, () => {
+      const config = nodeCloudCredentialConfig(node)
+      createCloudModelPicker(node, config, (count) => {
+        modelButton.name = `🔄 选择 ${config.label} 模型（${count}）`
+        node.setDirtyCanvas?.(true, true)
+      })
+    }, { serialize: false })
+    modelButton.serialize = false
+    modelButton.serializeValue = () => undefined
+    const mediaHelp = node.addWidget("button", "ℹ 参考图与视频帧上传说明", null, () => {
+      alert([
+        "参考图：按实际连接顺序编号为 <Picture 1>、<Picture 2>……，只发送给提示词 API。",
+        "参考视频帧：整个 IMAGE 批次都属于同一个 <Video 1> 的按时间排列帧；节点按“最多上传帧数”和“选帧方式”取样。",
+        "自动 / 联合上传：参考图与所选视频帧放进同一次多模态请求，便于模型同时理解目标身份和动作时间线。",
+        "分阶段上传：先分别分析参考图与视频时间线，再汇总生成 Prompt IR；主要用于 A/B 或单次联合请求不稳定时。",
+        "重要：以上素材只供云端 API 识别，不会自动传给 MiniMax H3；生成节点仍需另行连接对应图片、视频和音频。",
+      ].join("\n\n"))
+    }, { serialize: false })
+    mediaHelp.serialize = false
+    mediaHelp.serializeValue = () => undefined
+    const button = node.addWidget("button", "🔑 管理云端连接", null, () => {
+      const config = nodeCloudCredentialConfig(node)
+      createCloudCredentialModal(config, nodeCloudModel(node, config), (status) => {
+        button.name = status?.configured
+          ? `🔑 ${config.label} 已配置（${credentialSourceLabel(status.source)}）`
+          : `🔑 管理 ${config.label} 连接（未配置）`
+        node.setDirtyCanvas?.(true, true)
+      })
+    }, { serialize: false })
+    button.serialize = false
+    button.serializeValue = () => undefined
+    const refreshButtonStatus = () => {
+      const config = nodeCloudCredentialConfig(node)
+      button.name = `🔑 正在检查 ${config.label}…`
+      fetchCloudCredentialStatus(config).then((status) => {
+        button.name = status?.configured
+          ? `🔑 ${config.label} 已配置（${credentialSourceLabel(status.source)}）`
+          : `🔑 管理 ${config.label} 连接（未配置）`
+        node.setDirtyCanvas?.(true, true)
+      }).catch(() => {
+        button.name = `🔑 管理 ${config.label}（状态不可用）`
+        node.setDirtyCanvas?.(true, true)
+      })
+    }
+    const providerWidget = node.widgets?.find((item) => item?.name === "cloud_provider")
+    if (providerWidget && !providerWidget.__minimaxH3CloudCredentialCallback) {
+      providerWidget.__minimaxH3CloudCredentialCallback = true
+      const originalCallback = providerWidget.callback
+      providerWidget.callback = function () {
+        const callbackResult = originalCallback?.apply(this, arguments)
+        const config = nodeCloudCredentialConfig(node)
+        const modelWidget = node.widgets?.find((item) => item?.name === "api_model")
+        const modelValue = String(modelWidget?.value || "").trim()
+        const knownOtherDefault = Object.values(CLOUD_CREDENTIAL_PROVIDERS).some(
+          (item) => item.provider !== config.provider && item.defaultModel === modelValue,
+        )
+        if (modelWidget && knownOtherDefault) modelWidget.value = ""
+        modelButton.name = `🔄 刷新 / 选择 ${config.label} 模型`
+        queueMicrotask(refreshButtonStatus)
+        return callbackResult
+      }
+    }
+    refreshButtonStatus()
+    return result
+  }
+}
+
 app.registerExtension({
   name: "MiniMaxH3Lab.ChineseDisplay",
 
@@ -619,6 +1253,9 @@ app.registerExtension({
     }
     if (nodeData.name === "MiniMaxH3PromptDirector") {
       installModelRefreshButton(nodeType)
+    }
+    if (nodeData.name === "MiniMaxH3CloudDirector") {
+      installCloudCredentialButton(nodeType)
     }
     if (!isChineseLocale()) return
     const config = NODE_TRANSLATIONS[nodeData.name]
@@ -657,3 +1294,54 @@ app.registerExtension({
     app.graph?.setDirtyCanvas?.(true, true)
   },
 })
+
+
+// ===== v10: 多槽模块节点「刷新列表」按钮 + 联动下拉 =====
+app.registerExtension({
+  name: "MiniMaxH3.RefreshButtons",
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    const isMod = nodeData.name === "MiniMaxH3PromptModuleLoader";
+    if (!isMod) return;
+    const onNodeCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const r = onNodeCreated?.apply(this, arguments);
+      const node = this;
+      const refreshFiles = async () => {
+        try {
+          const curFolder = node.widgets?.find(w => w.name === "module_folder")?.value || "";
+          const resp = await api.fetchApi("/minimaxh3lab/api/module_files", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: "mod", folder: curFolder }),
+          });
+          const data = await resp.json();
+          const all = data.all_folders || {};
+          const folderKeys = Object.keys(all);
+          for (const w of node.widgets || []) {
+            if (w.name === "module_folder") {
+              w.options.values = folderKeys.length ? folderKeys : [""];
+            } else if (w.name && /^module_\d$/.test(w.name)) {
+              const mods = data.modules || [];
+              if (mods.length) w.options.values = mods.map(m => m.title_zh);
+            }
+          }
+          node.setDirtyCanvas(true, true);
+        } catch (e) {
+          console.error("[MiniMaxH3] 刷新列表失败", e);
+        }
+      };
+      const btn = node.addWidget("button", "\u{1f504} 刷新列表", null, refreshFiles);
+      btn.serialize = false; // 按钮不入工作流序列化
+      // module_folder 变化时自动刷新模块下拉
+      const folderW = node.widgets?.find(w => w.name === "module_folder");
+      if (folderW) {
+        const origCb = folderW.callback;
+        folderW.callback = (v) => {
+          origCb?.(v);
+          refreshFiles();
+        };
+      }
+      return r;
+    };
+  },
+});

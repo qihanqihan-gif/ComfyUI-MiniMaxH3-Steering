@@ -34,8 +34,8 @@ def test_module_files_exist():
     for expected in ("subtle_still_motion", "slow_push_in", "live_wallpaper",
                      "weather_ambience", "parallax_motion"):
         assert expected in ids, f"缺少图生视频模板 {expected}"
-    # v0.2：原 21 个 + 5 个通用回归模块
-    assert len(modules) == 26, f"可选模块应共 26 个，实际 {len(modules)}"
+    # v0.2：原 21 个 + 5 个通用回归模块 + 人物替换实验模块
+    assert len(modules) == 27, f"可选模块应共 27 个，实际 {len(modules)}"
     # 协议模块不得作为可选模块列出（由导演节点自动加载）
     assert "protocol_base" not in ids and "protocol_ref" not in ids, "协议不得列为可选模块"
     assert "official_three_part" not in ids and "official_six_part" not in ids, "旧规范模块应被过滤"
@@ -138,6 +138,110 @@ def test_is_changed_nan():
     mod = _load_mod()
     import math
     assert math.isnan(mod.MiniMaxH3PromptModuleLoader.IS_CHANGED()), "必须热加载（每次排队重读）"
+    assert math.isnan(mod.MiniMaxH3ModuleFolderLoader.IS_CHANGED())
+
+
+def test_module_file_choices_are_recursive_and_root_qualified(tmp_path, monkeypatch):
+    mod = _load_mod()
+    built_in = tmp_path / "modules"
+    extra = tmp_path / "extra"
+    (built_in / "角色").mkdir(parents=True)
+    (extra / "镜头" / "推进").mkdir(parents=True)
+    payload = {
+        "id": "valid", "title_zh": "有效模块", "instructions": "保留身份。",
+        "version": 1, "evidence_level": "experimental",
+    }
+    (built_in / "角色" / "identity.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    payload["id"] = "camera"
+    (extra / "镜头" / "推进" / "slow.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    protocol = dict(payload, id="protocol_base")
+    (built_in / "protocol_base.json").write_text(json.dumps(protocol, ensure_ascii=False), encoding="utf-8")
+    (built_in / "broken.json").write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(mod, "_MODULES_DIR", str(built_in))
+    monkeypatch.setattr(mod, "_EXTRA_ROOT", str(extra))
+
+    choices = mod._module_file_choices()
+    assert choices[0] == "（未选择）"
+    assert "内置/角色/identity.json" in choices
+    assert "用户库/镜头/推进/slow.json" in choices
+    assert not any("protocol_base.json" in item for item in choices)
+    assert not any("broken.json" in item for item in choices)
+
+
+def test_module_file_loader_loads_only_selected_file(tmp_path, monkeypatch):
+    mod = _load_mod()
+    built_in = tmp_path / "modules"
+    extra = tmp_path / "extra"
+    built_in.mkdir()
+    extra.mkdir()
+    pack = [
+        {"id": "one", "title_zh": "模块一", "version": 2,
+         "evidence_level": "official_aligned", "instructions": "规则一。"},
+        {"id": "two", "title_zh": "模块二", "instructions": "规则二。"},
+    ]
+    (built_in / "pack.json").write_text(json.dumps(pack, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(mod, "_MODULES_DIR", str(built_in))
+    monkeypatch.setattr(mod, "_EXTRA_ROOT", str(extra))
+
+    merged, diag = mod.MiniMaxH3ModuleFolderLoader().load_folder("内置/pack.json")
+    assert "[one | 模块一 | v2 | 官方规则对齐]" in merged
+    assert "规则一。" in merged and "规则二。" in merged
+    assert "有效模块=2" in diag
+
+
+def test_module_file_loader_combines_five_path_slots_and_deduplicates(tmp_path, monkeypatch):
+    mod = _load_mod()
+    built_in = tmp_path / "modules"
+    extra = tmp_path / "extra"
+    built_in.mkdir()
+    extra.mkdir()
+    first = {"id": "first", "title_zh": "第一模块", "instructions": "第一条规则。"}
+    second = {"id": "second", "title_zh": "第二模块", "instructions": "第二条规则。"}
+    duplicate = {"id": "first", "title_zh": "重复模块", "instructions": "不应重复注入。"}
+    (built_in / "first.json").write_text(json.dumps(first, ensure_ascii=False), encoding="utf-8")
+    (extra / "second.json").write_text(
+        json.dumps([second, duplicate], ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(mod, "_MODULES_DIR", str(built_in))
+    monkeypatch.setattr(mod, "_EXTRA_ROOT", str(extra))
+
+    node = mod.MiniMaxH3ModuleFolderLoader()
+    merged, diag = node.load_folder(
+        module_file="内置/first.json",
+        module_file_2="用户库/second.json",
+        module_file_3="内置/first.json",
+    )
+    assert "第一条规则。" in merged and "第二条规则。" in merged
+    assert "不应重复注入。" not in merged
+    assert merged.count("[first |") == 1
+    assert "已选文件=2" in diag and "有效模块=2" in diag
+    assert "重复文件选择已忽略" in diag
+    assert "重复模块 id 已跳过" in diag
+
+
+def test_module_file_loader_exposes_five_independent_path_combos():
+    mod = _load_mod()
+    required = mod.MiniMaxH3ModuleFolderLoader.INPUT_TYPES()["required"]
+    assert list(required) == [
+        "module_file", "module_file_2", "module_file_3", "module_file_4", "module_file_5"
+    ]
+    assert all(spec[0][0] == "（未选择）" for spec in required.values())
+
+
+def test_module_file_loader_empty_and_stale_selection_are_safe(tmp_path, monkeypatch):
+    mod = _load_mod()
+    built_in = tmp_path / "modules"
+    extra = tmp_path / "extra"
+    built_in.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(mod, "_MODULES_DIR", str(built_in))
+    monkeypatch.setattr(mod, "_EXTRA_ROOT", str(extra))
+
+    merged, diag = mod.MiniMaxH3ModuleFolderLoader().load_folder()
+    assert merged == ""
+    assert "有效模块=0" in diag
+    merged, diag = mod.MiniMaxH3ModuleFolderLoader().load_folder("内置/../outside.json")
+    assert merged == ""
+    assert "不存在或已移出允许目录" in diag
 
 
 def test_merged_within_limit():

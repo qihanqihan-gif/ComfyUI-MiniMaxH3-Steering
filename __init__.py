@@ -4,6 +4,7 @@ import json
 
 from aiohttp import web  # noqa: F401  (ComfyUI 自带依赖)
 
+from . import cloud_credentials
 from . import prompt_director
 from .easycache_safe import (
     NODE_CLASS_MAPPINGS as EASYCACHE_NODE_CLASS_MAPPINGS,
@@ -102,6 +103,160 @@ def _register_api_routes():
         return web.json_response(
             {"source": "OpenAI-compatible /models", "models": [{"id": m} for m in models]}
         )
+
+    @routes.post("/minimaxh3lab/api/module_files")
+    async def _module_files(request):
+        """前端「刷新模块列表」按钮：返回 modules/ 根 + 各子文件夹的 json 文件清单。
+        body: {"folder": "nsfw"}（可选）；返回 {"folder", "files", "all_folders"}。"""
+        import prompt_modules as _pm
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"error": "请求体必须是 JSON 对象"}, status=400)
+        folder = str(body.get("folder") or "").strip()
+        kind = str(body.get("kind") or "")
+        # kind=mod 用 5 槽节点文件夹下拉（含 modules/ 子文件夹）；否则用独立加载器下拉
+        folder_choices = _pm._folder_choices() if kind == "mod" else _pm._folder_choices_bare()
+        all_folders = {}
+        for f in folder_choices:
+            scan = "" if f == _pm._FOLDER_NONE else f
+            choices, _ = _pm._file_title_choices(scan)
+            all_folders[f] = choices[1:]
+        files = all_folders.get(folder, _pm._folder_json_files(folder))
+        try:
+            mod_folder = None if (not folder or folder == _pm._FOLDER_NONE) else folder
+            mods = [{"id": m["id"], "title_zh": m["title_zh"]} for m in _pm._load_modules(mod_folder)]
+        except Exception:  # noqa: BLE001
+            mods = []
+        return web.json_response(
+            {"folder": folder, "files": files, "all_folders": all_folders, "modules": mods}
+        )
+
+    @routes.get("/minimaxh3lab/cloud/credential/status")
+    async def _cloud_credential_status(request):
+        """Return non-secret credential state; never return the saved API Key."""
+        provider = str(request.query.get("provider") or "deepseek")
+        try:
+            credential_id = str(
+                request.query.get("credential_id")
+                or cloud_credentials.provider_definition(provider)["default_credential_id"]
+            )
+            status = cloud_credentials.credential_status(provider, credential_id)
+        except cloud_credentials.CloudCredentialError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "status": status})
+
+    @routes.post("/minimaxh3lab/cloud/credential/save")
+    async def _cloud_credential_save(request):
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            return web.json_response({"ok": False, "error": "请求体不是合法 JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        try:
+            provider = str(body.get("provider") or "deepseek")
+            credential_id = str(
+                body.get("credential_id")
+                or cloud_credentials.provider_definition(provider)["default_credential_id"]
+            )
+            status = cloud_credentials.save_credential(
+                provider,
+                credential_id,
+                str(body.get("api_key") or ""),
+            )
+        except cloud_credentials.CloudCredentialError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "status": status})
+
+    @routes.post("/minimaxh3lab/cloud/credential/clear")
+    async def _cloud_credential_clear(request):
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        try:
+            provider = str(body.get("provider") or "deepseek")
+            credential_id = str(
+                body.get("credential_id")
+                or cloud_credentials.provider_definition(provider)["default_credential_id"]
+            )
+            status = cloud_credentials.clear_credential(
+                provider,
+                credential_id,
+            )
+        except cloud_credentials.CloudCredentialError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "status": status})
+
+    @routes.post("/minimaxh3lab/cloud/credential/test")
+    async def _cloud_credential_test(request):
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        provider = str(body.get("provider") or "deepseek")
+        try:
+            credential_id = str(
+                body.get("credential_id")
+                or cloud_credentials.provider_definition(provider)["default_credential_id"]
+            )
+            key, source = cloud_credentials.resolve_credential(provider, credential_id)
+            provider_id = provider.strip().lower()
+            if provider_id == "deepseek":
+                result = cloud_credentials.test_deepseek_connection(
+                    key, body.get("timeout_s", 15),
+                )
+            elif provider_id == "gemini":
+                result = cloud_credentials.test_gemini_connection(
+                    key,
+                    str(body.get("model_id") or "gemini-3.1-flash-lite"),
+                    body.get("timeout_s", 30),
+                )
+            else:
+                raise cloud_credentials.CloudCredentialError(
+                    f"尚未实现 {provider_id or '?'} 的真实连接探针"
+                )
+        except cloud_credentials.CloudCredentialError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        # source is safe metadata; never include key or provider response bodies.
+        return web.json_response({"ok": True, "source": source, **result})
+
+    @routes.post("/minimaxh3lab/cloud/models")
+    async def _cloud_models(request):
+        """List provider-visible model IDs without exposing the resolved credential."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, web.HTTPBadRequest):
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        provider = str(body.get("provider") or "deepseek")
+        try:
+            credential_id = str(
+                body.get("credential_id")
+                or cloud_credentials.provider_definition(provider)["default_credential_id"]
+            )
+            try:
+                timeout_s = min(max(int(body.get("timeout_s", 30)), 5), 60)
+            except (TypeError, ValueError):
+                timeout_s = 30
+            key, source = cloud_credentials.resolve_credential(provider, credential_id)
+            models = cloud_credentials.list_cloud_models(provider, key, timeout_s)
+        except cloud_credentials.CloudCredentialError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({
+            "ok": True,
+            "provider": provider.strip().lower(),
+            "source": source,
+            "models": models,
+        })
 
 
 _register_api_routes()

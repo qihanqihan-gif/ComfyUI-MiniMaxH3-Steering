@@ -1,0 +1,21 @@
+{
+  "id": "character_replacement",
+  "title_zh": "人物替换（Ref2VA 换人复刻）",
+  "version": 1,
+  "scope": "Ref2VA",
+  "source": "本工作区 GPT半通用替换模板-对照验收-2026-08-16.md 合并版 + h3-character-replacement-合并版SKILL-2026-08-16.md",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": [
+    "character_replacement",
+    "motion_transfer",
+    "reference_generation",
+    "hard_lock",
+    "multi_reference"
+  ],
+  "conflicts": [
+    "seamless_loop",
+    "live_wallpaper"
+  ],
+  "instructions": "创作策略：仅当任务为「把参考视频中的原人物替换为新角色（保留背景/动作/镜头）」时使用。\n1. 任务定性：summary 开头写 [reference generation]（角色替换+动作迁移），绝不写 continuation/editing，全文禁用「逐帧执行/完整复刻/继续/延续」类措辞（实测：此类措辞会把任务推成 continuation 导致原样输出参考视频）。\n2. retention 双层声明：<Video N> 写 partially_preserved——FULLY PRESERVE 背景/场景/环境/灯光/构图/运镜/剪辑/时间结构；TRANSFER 给 <Subject N> 动作/姿态/节奏/手势/表情时点/空间路径；DO NOT PRESERVE 原人物身份/脸/发型/服装。<Subject N> 与 <Picture N> 写 fully_preserved。\n3. 完全不描述原人物：其身份/脸/服装只出现在 DO NOT PRESERVE 否定句；新角色特征全部来自参考图。\n4. 背景句必须引用 <Video N> 原背景（如 the background/scene/lighting of <Video N> is preserved unchanged），禁止自编新场景描述（实测：自编场景 = 背景被重绘）。\n5. HARD LOCK：Subject 定义只锁 3-5 项身份关键特征（每项含：是什么/数量/位置/永不发生/遮挡行为），如 red ring = single, fixed position, never mirrored/duplicated/relocated, natural occlusion；不锁姿势/表情等非身份细节（Over-Prompt 纪律）。\n6. 多视图/设定图显式声明 one single character only，防被理解为多人/克隆/分屏。\n7. 接线一致性：提示词引用的 <Picture N> 数量必须等于实际 ref_image 接线数（图-标签一一对应；实测 3 图只接 1 图替换失败）；不需要原音频则断开 ref_audio 接线或写 <Audio N>: reference。\n8. 分镜纪律：只写真观测时间戳；无完整视频分析则用整段转移语言（Transfer the complete action sequence... of <Video N> to <Subject N>），且不得以 Continue 开头。\n9. 长参考视频分段：单段 ≤15s（360 帧对齐，Qwen 通道 2fps 抽帧边界），长视频按 15s/段切片拼接。\n10. 失败先换 seed：同一提示词/参考图/参考视频下存在 seed 级成败差异（实测 00065-00072：seed 107/108 在两组参考视频下 4/4 失败、105/106/109/110 全成功）——生成结果不理想时优先更换 seed 重跑，勿在同 seed 重复抽卡。\n11. 换角色/换参考图必须清残留条款：全文检索上一角色的专属特征词（翅膀/光环/异色瞳/发色/服装等 HARD LOCK 与「贯穿整个视频」列表），只保留当前角色特征（实测：模板残留单翼条款 + 换无翅膀角色 → 模型脑补出翅膀/特征漂移 → 身份漂移）。\n12. 参考图优先选多视图/设定图（正面/侧面/背面+表情单图），单图承载全部身份信息、软参考遵循率更高；单立绘成功率低。"
+}
