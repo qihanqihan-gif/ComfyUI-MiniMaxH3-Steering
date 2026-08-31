@@ -8,7 +8,7 @@ Steering 允许在不修改任何权重文件的前提下，对 MiniMax-H3 文�
 
 > Keywords: `comfyui` · `minimax-h3` · `steering` · `activation-direction` · `abliteration` · `text-encoder` · `qwen3vl` · `prompt-director` · `prompt-modules` · `local-first` · `lm-studio`
 
-## ✨ v0.3.0-alpha：云端多模态导演与可复现创作规则管线
+## ✨ v0.3.0-alpha.1：云端多模态导演与可复现创作规则管线
 
 **MiniMax-H3-Lab —— 面向本地小/中型多模态模型的 H3 Prompt 实验与编译工具。**
 
