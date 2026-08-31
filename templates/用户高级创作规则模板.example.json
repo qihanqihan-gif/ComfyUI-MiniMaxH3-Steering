@@ -1,0 +1,49 @@
+{
+  "id": "my_advanced_camera_rule",
+  "title_zh": "我的高级镜头规则",
+  "version": 1,
+  "scope": "I2VA,Ref2VA",
+  "category": "camera",
+  "source": "user_local",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": [
+    "camera",
+    "continuity"
+  ],
+  "semantic_contract": {
+    "purpose": "为当前任务指定唯一主运镜，同时保持主体身份和空间方向连续。",
+    "adds": [
+      {
+        "path": "camera.motion.primary",
+        "value": "custom_primary_motion"
+      }
+    ],
+    "preserves": [
+      "subject.identity",
+      "continuity.screen_direction"
+    ],
+    "forbids": [
+      "contradictory_primary_camera_motion"
+    ],
+    "defaults": []
+  },
+  "ownership": {
+    "reads": [
+      "subject.identity"
+    ],
+    "writes": [
+      "camera.motion.primary"
+    ],
+    "augments": [
+      "continuity.screen_direction"
+    ]
+  },
+  "resolution": {
+    "exclusive_group": "camera.motion.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "定义唯一的主运镜，并让主体身份、画面方向和空间关系保持连续。\n不要同时要求互相矛盾的固定机位与大幅移动镜头。"
+}
