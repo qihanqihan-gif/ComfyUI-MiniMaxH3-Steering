@@ -1,5 +1,21 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
 data/
 *.npy
+.env
+.env.*
+!.env.example
+cloud_credentials.json
+custom_presets.json
+*.zip
+
+# 只保留说明文件；个人创作规则不得随仓库发布。
+prompt_modules/user/*
+!prompt_modules/user/.gitignore
+!prompt_modules/user/README.md
