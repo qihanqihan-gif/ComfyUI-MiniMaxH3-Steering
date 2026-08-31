@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import ssl
 import sys
@@ -38,6 +39,32 @@ from PIL import Image
 _PROMPT_MODULES = None
 _H3_COMPILER = None
 _CLOUD_CREDENTIALS = None
+_CLOUD_VIDEO = None
+_PROVIDER_REGISTRY = None
+
+
+def _load_provider_registry():
+    """加载 provider_registry.py（能力矩阵 + 语义解析 + preset↔profile 映射）。
+
+    与其它纯模块一致：ComfyUI 包内走相对导入；单测（importlib 直载本文件）走
+    与 probe 相同目录的 fallback 加载。
+    """
+    global _PROVIDER_REGISTRY
+    if _PROVIDER_REGISTRY is None:
+        import importlib
+        import importlib.util
+        if __package__:
+            _mod = importlib.import_module(".provider_registry", __package__)
+        else:
+            _spec = importlib.util.spec_from_file_location(
+                "provider_registry",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_registry.py"),
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            sys.modules["provider_registry"] = _mod
+            _spec.loader.exec_module(_mod)
+        _PROVIDER_REGISTRY = _mod
+    return _PROVIDER_REGISTRY
 
 
 def _load_prompt_modules():
@@ -88,6 +115,26 @@ def _load_cloud_credentials():
         _CLOUD_CREDENTIALS = _mod
     return _CLOUD_CREDENTIALS
 
+
+def _load_cloud_video():
+    """Load the runtime-only native video adapter without a hard import cycle."""
+    global _CLOUD_VIDEO
+    if _CLOUD_VIDEO is None:
+        import importlib
+        import importlib.util
+        if __package__:
+            _mod = importlib.import_module(".cloud_video", __package__)
+        else:
+            _spec = importlib.util.spec_from_file_location(
+                "cloud_video",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_video.py"),
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            sys.modules["cloud_video"] = _mod
+            _spec.loader.exec_module(_mod)
+        _CLOUD_VIDEO = _mod
+    return _CLOUD_VIDEO
+
 LOGGER = logging.getLogger(__name__)
 
 _ENV_API_KEY = "MINIMAX_H3_API_KEY"
@@ -119,6 +166,8 @@ _REWRITE_MODES = {
 # 2026-08-12：模型兼容层——不同模型对 JSON 输出纪律的遵循度不同，按 profile 注入差异指令
 _MODEL_PROFILES = [
     "auto", "gemma", "qwen", "cloud", "qwen3_8", "deepseek_vision", "gemini_vision",
+    # 2026-08-28：常用云端视觉模型预设（OpenAI 兼容壳 / Claude 原生）
+    "openai_compat_vision", "claude_vision",
 ]
 _FRAME_SELECTION_MODES = [
     "uniform_full", "uniform_no_edges", "custom_indices", "custom_percent",
@@ -141,6 +190,19 @@ _MODEL_COMPAT = {
         "联合理解全部 <Picture N> 目标参考与同一 <Video 1> 的按时间排列代表帧，再直接输出"
         "一个满足 JSON Schema 的完整对象。连续帧不是多段视频或独立分镜；禁止新增、重绘或"
         "重设计开头，禁止把源表演者外观迁移给目标主体；不要输出思考、分析摘要或 JSON 外文本。"
+    ),
+    # 2026-08-28：OpenAI 兼容壳视觉（豆包方舟 / GLM / MiniMax / 自定义），连续帧联合理解
+    "openai_compat_vision": (
+        "先在同一次多模态请求中联合理解全部 <Picture N> 目标参考与 <Video 1> 有序代表帧，"
+        "再直接输出一个完整合法 JSON 对象。连续帧不是多段视频或独立分镜；禁止新增、重绘或"
+        "重设计开头，禁止把源表演者外观迁移给目标主体；不要复述视觉分析、思考过程或输出契约，"
+        "JSON 完成后立即停止。"
+    ),
+    # 2026-08-28：Claude 原生 Messages 视觉（多图 content blocks）
+    "claude_vision": (
+        "联合理解全部 <Picture N> 目标参考与同一 <Video 1> 的有序代表帧，再直接输出一个完整"
+        "合法 JSON 对象。连续帧不是多段视频或独立分镜；禁止新增、重绘或重设计开头，禁止把"
+        "源表演者外观迁移给目标主体；不要输出思考、分析摘要或 JSON 外文本。"
     ),
 }
 
@@ -175,6 +237,25 @@ def _is_gemini_api(base_url: str) -> bool:
     return _api_host(base_url) == "generativelanguage.googleapis.com"
 
 
+# 2026-08-28：新增常用云端视觉 provider 的 host 判断（复用 _api_host）。
+def _is_volcengine_api(base_url: str) -> bool:
+    host = _api_host(base_url)
+    return host == "ark.cn-beijing.volces.com" or host.endswith(".volces.com")
+
+
+def _is_anthropic_api(base_url: str) -> bool:
+    return _api_host(base_url) == "api.anthropic.com"
+
+
+def _is_zhipu_api(base_url: str) -> bool:
+    return _api_host(base_url) == "open.bigmodel.cn"
+
+
+def _is_minimax_api(base_url: str) -> bool:
+    host = _api_host(base_url)
+    return host == "api.minimaxi.com" or host == "api.minimax.chat" or host == "api.minimax.io"
+
+
 def _auto_disables_thinking(model_name: str) -> bool:
     """结构化 Prompt IR 默认不让已知混合思考模型吞掉可见输出预算。"""
     name = str(model_name or "").casefold()
@@ -185,10 +266,32 @@ def _auto_disables_thinking(model_name: str) -> bool:
 
 def _resolved_reasoning_mode(api_reasoning: str, model_name: str,
                              request_purpose: str = "final") -> str:
+    """返回业务两态/auto（"on" | "off" | "auto"），作为 `_call_chat` 的思考开关依据。
+
+    契约（保持向后兼容）："off" = 尽可能关闭思考；"on" = 启用思考；"auto" = 让
+    wire 自己决定（adapter 再按官方默认处理）。对已在能力矩阵登记的云端模型
+    （DeepSeek 等）以 `provider_registry` 的 `ReasoningSpec`（can_disable /
+    supported_levels）为**单一来源**；本地模型（Qwen/Gemma/其它 LM Studio）未登记，
+    保留原模型名启发式。
+    """
     mode = str(api_reasoning or "auto").strip().lower()
     if mode in ("on", "off"):
         return mode
-    # Qwen3.8/Gemma4 的能力用于素材理解；最终 Prompt IR 是格式编译任务，默认直接作答。
+    registry = _load_provider_registry()
+    profile = registry.find_profile_for_model(model_name) if registry else None
+    if profile is not None:
+        semantic = registry.resolve_reasoning_semantic(
+            profile, api_reasoning, model_name=model_name, request_purpose=request_purpose,
+        )
+        # business 语义 → 两态/auto：off 保留 off；auto 保留 auto；其余（low/medium/
+        # high/max，表明该 wire 需要启用思考）一律归为 "on"。
+        if semantic == "off":
+            return "off"
+        if semantic == "auto":
+            return "auto"
+        return "on"
+    # 未登记模型的启发式（本地 Qwen/Gemma 等）：能力用于素材理解；最终 Prompt IR
+    # 是格式编译任务，默认直接作答。
     if _is_qwen38(model_name) or _is_gemma4(model_name):
         return "on" if request_purpose == "analysis" else "off"
     return "off" if _auto_disables_thinking(model_name) else "auto"
@@ -472,8 +575,12 @@ def _image_batch_to_data_urls(image_tensor: torch.Tensor, limit: int = 4,
     )
     encode_presets = [(int(max_side), int(quality))]
     if adaptive:
-        if len(selected) > 200:
-            encode_presets = [(512, 72), (384, 68)]
+        if len(selected) > 400:
+            # DeepSeek 600-frame boundary mode: preserve the requested count
+            # before falling back to uniform frame dropping under the byte cap.
+            encode_presets = [(384, 68), (320, 64), (256, 60)]
+        elif len(selected) > 200:
+            encode_presets = [(512, 72), (384, 68), (320, 64), (256, 60)]
         elif len(selected) > 120:
             encode_presets = [(640, 75), (512, 72), (384, 68)]
         elif len(selected) > 50:
@@ -513,14 +620,94 @@ def _summarize_indices(indices: list[int], edge: int = 6) -> str:
     return f"{values[:edge]} ... {values[-edge:]}（共 {len(values)} 个）"
 
 
+def _parse_timeline_manifest(value: str, input_frame_count: int | None = None) -> dict:
+    """Parse only the deterministic fields emitted by ``MiniMaxH3VideoContext``.
+
+    The manifest is optional and never trusted as prompt text.  We keep a narrow
+    typed projection so arbitrary JSON cannot become a hidden system prompt.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"时间线 manifest 不是合法 JSON：{exc}") from exc
+    if not isinstance(raw, dict) or raw.get("sequence_label") != "<Video 1>":
+        raise ValueError("时间线 manifest 必须来自 <Video 1> Video Context 节点")
+    try:
+        total_frames = max(1, int(raw.get("total_frames")))
+        fps = max(0.001, float(raw.get("fps")))
+        duration = max(0.0, float(raw.get("duration_seconds")))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("时间线 manifest 缺少有效 total_frames/fps/duration_seconds") from exc
+    frames_raw = raw.get("frames")
+    if not isinstance(frames_raw, list):
+        raise ValueError("时间线 manifest 缺少 frames 数组")
+    if input_frame_count is not None and len(frames_raw) != int(input_frame_count):
+        raise ValueError(
+            f"时间线 manifest 有 {len(frames_raw)} 帧记录，但当前 IMAGE 批次为 {input_frame_count} 帧；"
+            "请把同一个 Video Context 的 selected_frames 与 timeline_manifest 一起连接"
+        )
+    frames = []
+    for item in frames_raw:
+        if not isinstance(item, dict):
+            raise ValueError("时间线 manifest.frames 含非对象条目")
+        try:
+            source_index = int(item.get("frame"))
+            time_sec = float(item.get("time_sec"))
+            position = float(item.get("position"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("时间线 manifest.frames 缺少有效 frame/time_sec/position") from exc
+        if source_index < 0 or source_index >= total_frames:
+            raise ValueError(f"时间线源帧索引 {source_index} 超出 0..{total_frames - 1}")
+        frames.append({
+            "frame": source_index,
+            "time_sec": round(max(0.0, time_sec), 4),
+            "timecode": str(item.get("timecode") or ""),
+            "position": round(min(1.0, max(0.0, position)), 4),
+        })
+    segments = []
+    for item in raw.get("segments", []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = max(0.0, float(item.get("start_sec")))
+            end = max(start, float(item.get("end_sec")))
+            segment = max(1, int(item.get("segment")))
+        except (TypeError, ValueError):
+            continue
+        segments.append({
+            "segment": segment,
+            "start_sec": round(start, 4),
+            "end_sec": round(end, 4),
+            "start_timecode": str(item.get("start_timecode") or ""),
+            "end_timecode": str(item.get("end_timecode") or ""),
+        })
+    return {
+        "sequence_label": "<Video 1>",
+        "total_frames": total_frames,
+        "fps": round(fps, 3),
+        "duration_seconds": round(duration, 4),
+        "frames": frames,
+        "segments": segments,
+    }
+
+
 def _chat_completions_url(base_url: str) -> str:
-    """把 base_url 规范化为 /chat/completions 端点（兼容裸根/带 /v1//openai）。"""
+    """把 base_url 规范化为 /chat/completions 端点（兼容裸根/带 /vN//openai）。
+
+    - 已含 /chat/completions：原样。
+    - 以 /vN 结尾（/v1、/v3、/v4，如方舟 /api/v3、智谱 /paas/v4、MiniMax /v1）或 /openai：
+      视为已是 API 前缀 → 直接加 /chat/completions。
+    - 否则（裸 host）→ 加 /v1/chat/completions。
+    """
     url = base_url.rstrip("/")
     if not url.lower().startswith(("http://", "https://")):
         raise ValueError(f"api_base_url 仅支持 http/https: {base_url!r}")
     if url.endswith("/chat/completions"):
         return url
-    if url.endswith("/v1") or url.endswith("/openai"):
+    if url.endswith("/v1") or url.endswith("/openai") or re.search(r"/v[0-9]+$", url):
         return url + "/chat/completions"
     return url + "/v1/chat/completions"
 
@@ -598,6 +785,53 @@ def _json_fingerprint(value) -> str:
     return _sha256_bytes(canonical)
 
 
+_SAFE_PROVIDER_ERROR_HINTS = {
+    "local_model_not_loaded": (
+        "本机 API 已收到请求，但原生/JIT 自动加载未成功；"
+        "请刷新模型列表并核对模型 ID，仍失败时再到 LM Studio 检查加载日志"
+    ),
+    "model_not_found": "服务端找不到该模型；请刷新模型列表并核对模型 ID",
+    "context_limit_exceeded": "输入与输出预算超过当前已加载上下文；请减少帧/模块或降低输出令牌",
+    "output_budget_rejected": "服务端拒绝当前输出令牌预算；请降低 Prompt IR 最大输出令牌",
+    "request_shape_rejected": "服务端拒绝当前请求结构；该模型可能不兼容多图或结构化输出字段",
+    "structured_output_rejected": "服务端不接受当前结构化输出参数；节点会在允许时做一次受控降级",
+    "authentication_failed": "API 凭据无效或无权调用当前模型",
+    "payload_too_large": "请求体过大；请减少视频帧数量或降低图片尺寸",
+}
+
+
+def _safe_provider_error_code(exc) -> str:
+    """Map a provider error body to a small safe code; never expose its body.
+
+    Provider bodies may contain prompts or echo request fragments.  We therefore
+    only recognize a narrow phrase set and return a canned local-language hint.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        raw = exc.read(8192)
+    except Exception:  # noqa: BLE001 - diagnostic only
+        return ""
+    text = raw.decode("utf-8", errors="ignore").casefold()
+    if "no models loaded" in text or "no model loaded" in text:
+        return "local_model_not_loaded"
+    if "model_not_found" in text or "model not found" in text or "unknown model" in text:
+        return "model_not_found"
+    if any(token in text for token in ("context length", "context window", "maximum context")):
+        return "context_limit_exceeded"
+    if any(token in text for token in ("max_tokens", "max output tokens", "output token")):
+        return "output_budget_rejected"
+    if "invalid discriminator" in text or "invalid content type" in text:
+        return "request_shape_rejected"
+    if "response_format" in text or "json_schema" in text:
+        return "structured_output_rejected"
+    if any(token in text for token in ("invalid api key", "unauthorized", "authentication failed")):
+        return "authentication_failed"
+    if "payload too large" in text or "request entity too large" in text:
+        return "payload_too_large"
+    return ""
+
+
 class _TransportFailure(RuntimeError):
     """不携带响应正文/密钥的安全传输错误，同时保留分类元数据。"""
 
@@ -606,10 +840,15 @@ class _TransportFailure(RuntimeError):
         self.status = status
         self.transport_meta = dict(meta or {})
         status_note = f"，HTTP {status}" if status is not None else ""
+        attempts = self.transport_meta.get("attempts") or []
+        provider_error = str(attempts[-1].get("provider_error") or "") if attempts else ""
+        action = _SAFE_PROVIDER_ERROR_HINTS.get(provider_error, "")
+        action_note = f"；建议：{action}" if action else ""
         super().__init__(
             f"API 传输失败：{self.category}{status_note}；"
             f"attempts={len(self.transport_meta.get('attempts') or [])}；"
             f"request_sha256={self.transport_meta.get('request_sha256', '?')}"
+            f"{action_note}"
         )
 
 
@@ -702,14 +941,18 @@ def _post_json_bytes(url: str, body_bytes: bytes, headers: dict, timeout_s: int,
             }
         except Exception as exc:  # noqa: BLE001
             category, retryable, status = _classify_transport_error(exc)
+            provider_error = _safe_provider_error_code(exc)
             should_retry = bool(retryable and attempt_index < retry_budget)
-            attempts.append({
+            attempt = {
                 "attempt": attempt_index + 1,
                 "result": "retry" if should_retry else "failed",
                 "category": category,
                 "status": status,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000),
-            })
+            }
+            if provider_error:
+                attempt["provider_error"] = provider_error
+            attempts.append(attempt)
             meta = {
                 "request_sha256": fingerprint,
                 "payload_bytes": len(body),
@@ -728,7 +971,7 @@ class _ChatCompletionText(str):
 
     def __new__(cls, content, *, finish_reason="", usage=None, reasoning_content="",
                 response_format_fallback=False, backend="openai_compat",
-                transport_meta=None):
+                transport_meta=None, media_meta=None):
         obj = super().__new__(cls, content or "")
         obj.finish_reason = str(finish_reason or "")
         obj.usage = usage if isinstance(usage, dict) else {}
@@ -736,6 +979,7 @@ class _ChatCompletionText(str):
         obj.response_format_fallback = bool(response_format_fallback)
         obj.backend = str(backend or "openai_compat")
         obj.transport_meta = dict(transport_meta or {})
+        obj.media_meta = dict(media_meta or {})
         return obj
 
 
@@ -761,11 +1005,15 @@ def _chat_stats_note(raw, label: str) -> str:
     request_hash = str(transport.get("request_sha256") or "")
     payload_bytes = int(transport.get("payload_bytes") or 0)
     attempts = transport.get("attempts") if isinstance(transport.get("attempts"), list) else []
+    network_elapsed_ms = sum(
+        int(item.get("elapsed_ms") or 0) for item in attempts if isinstance(item, dict)
+    )
     transport_note = ""
     if request_hash:
         transport_note = (
             f"，request_sha256={request_hash}，payload={payload_bytes / 1024 / 1024:.2f} MiB，"
             f"transport_attempts={len(attempts)}"
+            f"，network_elapsed={network_elapsed_ms / 1000:.2f}s"
         )
     return (
         f"{label}: finish_reason={finish_reason or '?'}{backend_note}，prompt={prompt_tokens} token，"
@@ -899,7 +1147,7 @@ def _lmstudio_native_input(messages) -> tuple[str, object]:
 
 def _call_lmstudio_native(base_url, api_key, model, messages, temperature,
                           max_tokens, timeout_s, reasoning_mode) -> _ChatCompletionText:
-    """LM Studio 原生 API：reasoning=off 在 Qwen3.8 GGUF 上比兼容参数可靠。"""
+    """LM Studio 原生 API；按模型 ID 请求，允许服务端按需/JIT 加载模型。"""
     root = _lmstudio_root(base_url)
     system_prompt, native_input = _lmstudio_native_input(messages)
     payload = {
@@ -1005,6 +1253,8 @@ def _gemini_native_messages(messages) -> tuple[dict | None, list[dict]]:
                     parts.append({"text": str(part.get("text") or "")})
                 elif part_type == "image_url":
                     parts.append(_gemini_data_url_part(part.get("image_url")))
+                elif part_type == "gemini_video_file":
+                    parts.append({"__minimax_h3_native_video__": dict(part)})
                 else:
                     raise ValueError(f"Gemini 不支持的内容块类型：{part_type or '?'}")
         else:
@@ -1024,18 +1274,38 @@ def _gemini_thinking_level(api_reasoning: str, model: str,
                             request_purpose: str) -> str:
     """Map the common UI to supported Gemini 3 thinking levels.
 
-    Gemini 3.7 Flash and 3.1 Pro reject ``minimal``.  They receive ``low`` for
-    the UI's off/final-auto intent; other Gemini 3 Flash/Lite models can use
-    ``minimal`` for compact final Prompt IR output.
+    思考**语义**（off 能否真关 / auto 默认 / level 校验）以 provider_registry 的
+    `ReasoningSpec` 为单一来源，不再散落在模型名启发式里；本函数只做「统一语义 →
+    Gemini ``thinkingLevel`` 字段」的 wire 层翻译。Gemini 3.7 Flash 与 3.1 Pro
+    拒绝 ``minimal``，用 ``low`` 承载"最低开启"语义；其它 Gemini 3 Flash/Lite 模型
+    可用 ``minimal`` 产出更紧凑的最终 Prompt IR。
     """
     mode = str(api_reasoning or "auto").strip().casefold()
     if mode == "on":
         return "high"
+    registry = _load_provider_registry()
+    profile = registry.find_profile_for_model(model) if registry else None
+    if registry is not None and profile is not None:
+        semantic = registry.resolve_reasoning_semantic(
+            profile, api_reasoning, model_name=model, request_purpose=request_purpose,
+        )
+    else:
+        # 能力矩阵不可达时的兜底：保留旧启发式（不中断调用）。
+        semantic = mode
     model_name = str(model or "").casefold()
     minimum = "low" if ("3.7" in model_name or "3.1-pro" in model_name) else "minimal"
-    if mode == "off":
+    if semantic == "auto":
+        # auto 不做语义改写（registry 透传），由本 adapter 按官方默认定向。
+        return "low" if str(request_purpose or "final") == "analysis" else minimum
+    if semantic == "off":
+        # registry 只在 can_disable 时保留 off；Gemini 3 字段层无 off，兜底最低开启档。
         return minimum
-    return "low" if str(request_purpose or "final") == "analysis" else minimum
+    if semantic in ("high", "max"):
+        return "high"
+    if semantic == "medium":
+        return "medium"
+    # semantic in ("low", 其它非 off 开启级)：都收敛到该 wire 的最低开启字段。
+    return minimum
 
 
 def _reasoning_report_mode(base_url: str, api_reasoning: str, model: str,
@@ -1055,6 +1325,37 @@ def _call_gemini_native(base_url, api_key, model, messages, temperature,
     import urllib.parse
 
     system_instruction, contents = _gemini_native_messages(messages)
+    native_video_meta = {}
+    cleanup_name = ""
+    native_markers = []
+    for content in contents:
+        parts = content.get("parts") if isinstance(content, dict) else None
+        if not isinstance(parts, list):
+            continue
+        for index, part in enumerate(parts):
+            if isinstance(part, dict) and "__minimax_h3_native_video__" in part:
+                native_markers.append((parts, index, part["__minimax_h3_native_video__"]))
+    if len(native_markers) > 1:
+        raise ValueError("Gemini 云端导演每次只允许一个原生视频")
+    if native_markers:
+        parts, index, marker = native_markers[0]
+        inline_overhead_bytes = 0
+        for content in contents:
+            content_parts = content.get("parts") if isinstance(content, dict) else None
+            if not isinstance(content_parts, list):
+                continue
+            for part in content_parts:
+                inline_data = part.get("inlineData") if isinstance(part, dict) else None
+                if isinstance(inline_data, dict):
+                    inline_overhead_bytes += len(str(inline_data.get("data") or ""))
+        video_part, native_video_meta, cleanup_name = _load_cloud_video().prepare_gemini_video(
+            marker.get("source"), api_key,
+            route=str(marker.get("route") or "auto"),
+            fps=float(marker.get("fps") or 0.0),
+            timeout_s=int(timeout_s),
+            inline_overhead_bytes=inline_overhead_bytes,
+        )
+        parts[index] = video_part
     generation_config = {
         "temperature": min(2.0, max(0.0, float(temperature))),
         "maxOutputTokens": int(max_tokens),
@@ -1093,28 +1394,35 @@ def _call_gemini_native(base_url, api_key, model, messages, temperature,
     ).encode("utf-8")
     response_format_fallback = False
     try:
-        response_bytes, transport_meta = _post_json_bytes(
-            url, body_bytes, headers, timeout_s, max_retries=1,
-        )
-    except _TransportFailure as exc:
-        if (
-            json_mode == "auto_retry"
-            and exc.status in (400, 422)
-            and "responseMimeType" in generation_config
-        ):
-            previous_hash = str(exc.transport_meta.get("request_sha256") or "")
-            generation_config.pop("responseMimeType", None)
-            generation_config.pop("responseJsonSchema", None)
-            response_format_fallback = True
-            fallback_body = json.dumps(
-                payload, ensure_ascii=False, separators=(",", ":"),
-            ).encode("utf-8")
+        try:
             response_bytes, transport_meta = _post_json_bytes(
-                url, fallback_body, headers, timeout_s, max_retries=1,
+                url, body_bytes, headers, timeout_s, max_retries=1,
             )
-            transport_meta["wire_fallback_from_sha256"] = previous_hash
-        else:
-            raise
+        except _TransportFailure as exc:
+            if (
+                json_mode == "auto_retry"
+                and exc.status in (400, 422)
+                and "responseMimeType" in generation_config
+            ):
+                previous_hash = str(exc.transport_meta.get("request_sha256") or "")
+                generation_config.pop("responseMimeType", None)
+                generation_config.pop("responseJsonSchema", None)
+                response_format_fallback = True
+                fallback_body = json.dumps(
+                    payload, ensure_ascii=False, separators=(",", ":"),
+                ).encode("utf-8")
+                response_bytes, transport_meta = _post_json_bytes(
+                    url, fallback_body, headers, timeout_s, max_retries=1,
+                )
+                transport_meta["wire_fallback_from_sha256"] = previous_hash
+            else:
+                raise
+    finally:
+        if cleanup_name:
+            deleted = _load_cloud_video().delete_gemini_file(
+                cleanup_name, api_key, timeout_s=min(30, int(timeout_s)),
+            )
+            native_video_meta["remote_cleanup"] = "deleted" if deleted else "delete_failed"
     try:
         data = json.loads(response_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1157,6 +1465,166 @@ def _call_gemini_native(base_url, api_key, model, messages, temperature,
         response_format_fallback=response_format_fallback,
         backend="gemini_generate_content",
         transport_meta=transport_meta,
+        media_meta=native_video_meta,
+    )
+
+
+def _claude_thinking_effort(api_reasoning: str, request_purpose: str) -> tuple[str, str]:
+    """Claude 4.6/4.7 用 adaptive thinking + output_config.effort。
+
+    返回 (thinking_type, effort)。Claude 4.7 禁止 budget_tokens / 非默认采样参数，
+    统一走 thinking:{type:"adaptive"}；effort 按 api_reasoning + request_purpose 映射，
+    不传 temperature（4.7 对非默认 temperature 会 400）。
+    """
+    mode = str(api_reasoning or "auto").strip().casefold()
+    # final 是格式编译任务，默认尽量省思考；analysis 识图给中档。
+    effort = "low" if request_purpose == "final" else "medium"
+    if mode == "on":
+        effort = "high"
+    elif mode == "off":
+        # Claude 可关思考：adaptive 配合 effort=low 已接近最省；off 时不传 effort 让
+        # 模型默认（high）。为真正降低思考，这里仍用 adaptive + "low"（3.0 官方语义）。
+        effort = "low"
+    elif mode == "high":
+        effort = "high"
+    elif mode == "max":
+        effort = "max"
+    elif mode == "medium":
+        effort = "medium"
+    return "adaptive", effort
+
+
+def _claude_media_source(value) -> dict:
+    """OpenAI-style image_url data URL → Claude base64 source block."""
+    data_url = value.get("url") if isinstance(value, dict) else value
+    raw = str(data_url or "")
+    if not raw.startswith("data:") or ";base64," not in raw:
+        raise ValueError("Claude 当前只接受节点内部生成的 base64 data URL 图片")
+    header, encoded = raw.split(",", 1)
+    mime_type = header[5:].split(";", 1)[0].strip().casefold()
+    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        raise ValueError(f"Claude 不支持的图片 MIME：{mime_type or '?'}")
+    if not encoded:
+        raise ValueError("Claude 图片 data URL 内容为空")
+    return {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": encoded}}
+
+
+def _claude_messages(messages) -> tuple[str, list[dict]]:
+    """OpenAI messages → Claude (system_text, content_blocks[])。"""
+    system_text_parts = []
+    blocks = []
+    for message in messages:
+        role = str(message.get("role") or "").strip().casefold()
+        content = message.get("content")
+        if role == "system":
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        system_text_parts.append(str(part.get("text") or ""))
+                    elif part:
+                        raise ValueError("Claude system 只允许文本内容")
+            else:
+                system_text_parts.append(str(content or ""))
+            continue
+        if role not in {"user", "assistant"}:
+            raise ValueError(f"Claude 不支持的消息角色：{role or '?'}")
+        if isinstance(content, str):
+            blocks.append({"role": role, "content": [{"type": "text", "text": content}]})
+            continue
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    parts.append({"type": "text", "text": str(part)})
+                    continue
+                part_type = str(part.get("type") or "")
+                if part_type == "text":
+                    parts.append({"type": "text", "text": str(part.get("text") or "")})
+                elif part_type == "image_url":
+                    parts.append(_claude_media_source(part.get("image_url")))
+                else:
+                    raise ValueError(f"Claude 不支持的内容块类型：{part_type or '?'}")
+            blocks.append({"role": role, "content": parts})
+            continue
+        raise ValueError(f"Claude 不支持的消息 content 类型：{type(content).__name__}")
+    return "\n\n".join(system_text_parts), blocks
+
+
+def _call_claude_messages(base_url, api_key, model, messages, temperature,
+                           max_tokens, timeout_s, json_mode="force",
+                           api_reasoning="auto", response_schema=None,
+                           request_purpose="final") -> _ChatCompletionText:
+    """调用 Anthropic 原生 Messages API（/v1/messages）。
+
+    - x-api-key + anthropic-version 认证。
+    - 单图/多图 content blocks（base64 source）。
+    - thinking:{type:"adaptive"} + output_config:{effort}（4.6/4.7；不传 temperature）。
+    - 只要求 JSON 时通过 system 提示 + 本地解析（Claude 原生 output_config.format
+      暂未启用，避免跨版本 400）。
+    """
+    system_text, claude_blocks = _claude_messages(messages)
+    thinking_type, effort = _claude_thinking_effort(api_reasoning, request_purpose)
+    payload = {
+        "model": model,
+        "max_tokens": int(max_tokens),
+        "messages": claude_blocks,
+        "thinking": {"type": thinking_type},
+        "output_config": {"effort": effort},
+    }
+    if system_text:
+        payload["system"] = system_text
+    if json_mode != "off":
+        # 不启用 output_config.format（跨版本兼容风险），靠 system 提示 + 本地 JSON 解析。
+        pass
+    url = "https://api.anthropic.com/v1/messages"
+    if _api_host(base_url) == "api.anthropic.com" or "anthropic" in str(base_url or ""):
+        root = str(base_url or "").strip().rstrip("/")
+        url = root if root.endswith("/messages") else root + "/messages"
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    body_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    try:
+        response_bytes, transport_meta = _post_json_bytes(
+            url, body_bytes, headers, timeout_s, max_retries=1,
+        )
+    except _TransportFailure as exc:
+        raise
+    try:
+        data = json.loads(response_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "Claude 返回体不是合法 UTF-8 JSON；"
+            f"request_sha256={transport_meta.get('request_sha256', '?')}"
+        ) from exc
+    try:
+        content_blocks = data["content"]
+        content = "".join(
+            str(block.get("text") or "") for block in content_blocks
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+        finish_raw = str(data.get("stop_reason") or "end_turn")
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Claude 响应缺少 content：{str(data)[:200]}") from exc
+    usage = data.get("usage", {})
+    usage = usage if isinstance(usage, dict) else {}
+    finish_reason = "length" if finish_raw.casefold() in {"max_tokens", "length"} else finish_raw.casefold()
+    return _ChatCompletionText(
+        content,
+        finish_reason=finish_reason,
+        usage={
+            "prompt_tokens": usage.get("input_tokens"),
+            "completion_tokens": usage.get("output_tokens"),
+            "total_tokens": (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0),
+            "completion_tokens_details": {
+                "reasoning_tokens": usage.get("output_tokens", 0),
+            },
+        },
+        reasoning_content="",
+        backend="claude_messages",
+        transport_meta=transport_meta,
     )
 
 
@@ -1174,6 +1642,13 @@ def _call_chat(base_url, api_key, model, messages, temperature, max_tokens, time
     """
     if _is_gemini_api(base_url):
         return _call_gemini_native(
+            base_url, api_key, model, messages, temperature, max_tokens, timeout_s,
+            json_mode=json_mode, api_reasoning=api_reasoning,
+            response_schema=response_schema, request_purpose=request_purpose,
+        )
+    if _is_anthropic_api(base_url):
+        # Claude 原生 Messages（x-api-key + anthropic-version）；不传 temperature。
+        return _call_claude_messages(
             base_url, api_key, model, messages, temperature, max_tokens, timeout_s,
             json_mode=json_mode, api_reasoning=api_reasoning,
             response_schema=response_schema, request_purpose=request_purpose,
@@ -1202,22 +1677,19 @@ def _call_chat(base_url, api_key, model, messages, temperature, max_tokens, time
     reasoning_mode = _resolved_reasoning_mode(
         api_reasoning, model, request_purpose=request_purpose,
     )
-    if (
-        reasoning_mode == "off"
-        and request_purpose == "final"
-        and _is_local_lmstudio_url(base_url)
-        and json_mode != "force"
-    ):
+    if _is_local_lmstudio_url(base_url) and json_mode != "force":
+        native_reasoning = "off" if reasoning_mode == "off" else "on"
         try:
             return _call_lmstudio_native(
                 base_url, api_key, model, messages, temperature,
-                max_tokens, timeout_s, reasoning_mode="off",
+                max_tokens, timeout_s, reasoning_mode=native_reasoning,
             )
         except Exception as exc:  # noqa: BLE001
             # 旧版/非 LM Studio 本地服务没有原生端点时仍保留兼容路径。
             LOGGER.warning(
-                "MiniMax H3 PromptDirector: LM Studio 原生 reasoning=off 调用失败，"
-                "回退 OpenAI 兼容接口 + /no_think: %s", exc,
+                "MiniMax H3 PromptDirector: LM Studio 原生/JIT 调用失败，"
+                "回退 OpenAI 兼容接口（reasoning=%s）: %s",
+                native_reasoning, exc,
             )
     if is_deepseek:
         if reasoning_mode == "off":
@@ -1226,16 +1698,31 @@ def _call_chat(base_url, api_key, model, messages, temperature, max_tokens, time
             payload["thinking"] = {"type": "enabled"}
             payload["reasoning_effort"] = "low" if reasoning_mode == "auto" else "high"
             payload.pop("temperature", None)
-    elif reasoning_mode == "off":
-        payload["chat_template_kwargs"] = {"enable_thinking": False}
-        if _is_qwen38(model):
-            # 本机 LM Studio/Qwen3.8 GGUF 实测模板变量可能被接受但不生效；
-            # 官方文本开关 /no_think 是必要的第二通道。
-            payload["messages"] = _qwen_no_think_messages(messages)
-            # Qwen3.8 官方 non-thinking 推荐项；temperature 仍尊重节点显式设置。
-            payload.update({"top_p": 0.8, "top_k": 20, "presence_penalty": 1.5})
-    elif reasoning_mode == "on":
-        payload["chat_template_kwargs"] = {"enable_thinking": True}
+    elif _is_zhipu_api(base_url):
+        # GLM(智谱)：官方 thinking.type 仅支持 enabled，不能关闭思考（视觉示例明确
+        # 用 thinking:{type:"enabled"}）。统一注入 enabled，不因 off 关闭、不误发
+        # reasoning_effort（GLM 不接受该字段）。
+        payload["thinking"] = {"type": "enabled"}
+        # 官方推荐 temperature=1 / top_p=0.95；此处保留用户显式设置，不强制覆盖。
+    elif _is_local_lmstudio_url(base_url) or _is_qwen38(model):
+        # 本地 LM Studio / Qwen3.8：保留 chat_template_kwargs + reasoning_effort=none
+        # + /no_think 三通道（本机实测模板变量可能被接受但不生效）。
+        if reasoning_mode == "off":
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["reasoning_effort"] = "none"
+            if _is_qwen38(model):
+                payload["messages"] = _qwen_no_think_messages(messages)
+                payload.update({"top_p": 0.8, "top_k": 20, "presence_penalty": 1.5})
+        elif reasoning_mode == "on":
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
+    else:
+        # 云端 OpenAI 兼容（豆包方舟 / GLM / MiniMax / 自定义）：统一用顶层
+        # reasoning_effort（比 chat_template_kwargs 更通用、各服务接受度更好）。
+        # off→none；其它→high（auto 默认）。auto_retry 时遇 400/422 可降级去掉。
+        if reasoning_mode == "off":
+            payload["reasoning_effort"] = "none"
+        elif reasoning_mode in ("on", "auto"):
+            payload["reasoning_effort"] = "high"
 
     _reject_link_local_target(base_url)
     url = _chat_completions_url(base_url)
@@ -1253,25 +1740,47 @@ def _call_chat(base_url, api_key, model, messages, temperature, max_tokens, time
             max_retries=1 if is_deepseek else 0,
         )
     except _TransportFailure as exc:
-        if (
-            json_mode == "auto_retry"
-            and exc.status in (400, 422)
-            and "response_format" in payload
-        ):
-            # 服务器拒绝结构化输出 → 降级为无结构重试（系统提示词仍要求 JSON）
-            previous_hash = str(exc.transport_meta.get("request_sha256") or "")
-            payload.pop("response_format", None)
-            response_format_fallback = True
-            fallback_body = json.dumps(
-                payload, ensure_ascii=False, separators=(",", ":"),
-            ).encode("utf-8")
-            response_bytes, transport_meta = _post_json_bytes(
-                url, fallback_body, headers, timeout_s,
-                max_retries=1 if is_deepseek else 0,
-            )
-            transport_meta["wire_fallback_from_sha256"] = previous_hash
-        else:
+        if exc.status not in (400, 422):
             raise
+        # 服务器拒绝某个"可降级"控制字段时，逐项去掉它重发一次，避免把控制参数
+        # 静默遗留给服务端默认值（例如模型不支持 reasoning_effort / json_schema）。
+        # 阶段 1：去掉 reasoning_effort（保留 JSON 结构）；阶段 2：仅 auto_retry 下
+        # 再去掉 response_format 降级为无结构输出（force 保留结构化，不降级）。
+        prov_dropped = []
+        retried_payload = dict(payload)
+        response_format_fallback = False
+        original_hash = str(exc.transport_meta.get("request_sha256") or "")
+        fallback_error = exc
+        fallback_succeeded = False
+        for attempt in range(2):
+            if "reasoning_effort" in retried_payload:
+                retried_payload.pop("reasoning_effort", None)
+                prov_dropped.append("reasoning_effort")
+            elif json_mode == "auto_retry" and "response_format" in retried_payload:
+                retried_payload.pop("response_format", None)
+                response_format_fallback = True
+                prov_dropped.append("response_format")
+            else:
+                raise fallback_error
+            fallback_body = json.dumps(
+                retried_payload, ensure_ascii=False, separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                response_bytes, transport_meta = _post_json_bytes(
+                    url, fallback_body, headers, timeout_s,
+                    max_retries=1 if is_deepseek else 0,
+                )
+            except _TransportFailure as inner_exc:
+                if inner_exc.status not in (400, 422):
+                    raise
+                fallback_error = inner_exc
+                continue
+            transport_meta["wire_fallback_from_sha256"] = original_hash
+            transport_meta["wire_fallback_dropped"] = list(prov_dropped)
+            fallback_succeeded = True
+            break
+        if not fallback_succeeded:
+            raise fallback_error
     try:
         data = json.loads(response_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1313,6 +1822,54 @@ def _parse_json_text(raw: str):
         except json.JSONDecodeError:
             pass
     raise ValueError(f"模型输出不是合法 JSON: {raw[:200]}")
+
+
+def _user_media_reference_notes(prompt: str, picture_count: int, has_video: bool) -> list[str]:
+    """检查用户提示词里的官方素材标签；只生成提醒，不改写或阻断请求。"""
+    text = str(prompt or "")
+    try:
+        picture_total = max(0, int(picture_count))
+    except (TypeError, ValueError):
+        picture_total = 0
+    picture_refs = sorted({
+        int(value)
+        for value in re.findall(r"<Picture\s+(\d+)>", text, flags=re.IGNORECASE)
+    })
+    video_refs = sorted({
+        int(value)
+        for value in re.findall(r"<Video\s+(\d+)>", text, flags=re.IGNORECASE)
+    })
+
+    notes = []
+    invalid_pictures = [value for value in picture_refs if value < 1 or value > picture_total]
+    if invalid_pictures:
+        labels = "、".join(f"<Picture {value}>" for value in invalid_pictures)
+        notes.append(
+            f"[素材引用提醒] 提示词引用了当前不存在的 {labels}；"
+            f"本次实际连接参考图 {picture_total} 张。"
+        )
+    missing_pictures = [
+        value for value in range(1, picture_total + 1) if value not in picture_refs
+    ]
+    if missing_pictures:
+        labels = "、".join(f"<Picture {value}>" for value in missing_pictures)
+        notes.append(
+            f"[素材引用提醒] 已连接但未显式引用 {labels}；素材仍会发送给提示词模型。"
+        )
+
+    invalid_videos = [value for value in video_refs if value != 1 or not has_video]
+    if invalid_videos:
+        labels = "、".join(f"<Video {value}>" for value in invalid_videos)
+        notes.append(
+            f"[素材引用提醒] {labels} 与当前视频输入不匹配；"
+            "本节点的参考视频统一对应 <Video 1>。"
+        )
+    if has_video and 1 not in video_refs:
+        notes.append(
+            "[素材引用提醒] 已连接参考视频但提示词未显式写 <Video 1>；"
+            "视频仍会发送给提示词模型。"
+        )
+    return notes
 
 
 def _lmstudio_root(base_url: str) -> str:
@@ -1553,6 +2110,11 @@ class MiniMaxH3PromptDirector:
                     "IMAGE",
                     {"label": "参考视频抽帧 / 图像序列（批次；仅供 API，不传给 H3）"},
                 ),
+                "video_timeline_manifest": (
+                    "STRING",
+                    {"multiline": True, "default": "", "forceInput": True,
+                     "label": "Video Context 时间线 manifest（可选）"},
+                ),
                 # v0.2：可接提示词模块节点输出（可选，非空时并入 system）
                 "system_module": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
                 # 模块节点第 4 输出：只用于诊断/IR 追踪，不重复发送给 LLM
@@ -1591,6 +2153,12 @@ class MiniMaxH3PromptDirector:
         cloud_connection_note = str(
             kwargs.pop("_cloud_connection_note", "") or ""
         ).strip()
+        native_video_source = kwargs.pop("_cloud_video", None)
+        gemini_video_route = str(kwargs.pop("_gemini_video_route", "auto") or "auto")
+        try:
+            gemini_video_fps = float(kwargs.pop("_gemini_video_fps", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            gemini_video_fps = 0.0
         lm_notes = []
         module_notes = []
         runtime_notes = []
@@ -1599,6 +2167,14 @@ class MiniMaxH3PromptDirector:
         module_ids = []
         is_deepseek = _is_deepseek_api(api_base_url)
         is_gemini = _is_gemini_api(api_base_url)
+        is_volcengine = _is_volcengine_api(api_base_url)
+        is_anthropic = _is_anthropic_api(api_base_url)
+        is_zhipu = _is_zhipu_api(api_base_url)
+        is_minimax = _is_minimax_api(api_base_url)
+        if native_video_source is not None and not is_gemini:
+            raise RuntimeError(
+                "云端原生视频输入目前只适配 Gemini；DeepSeek 边界测试请连接 IMAGE 帧批次"
+            )
         max_tokens, budget_note = _normalize_prompt_ir_budget(max_tokens)
         if budget_note:
             runtime_notes.append(budget_note)
@@ -1625,10 +2201,23 @@ class MiniMaxH3PromptDirector:
                 manifest = json.loads(manifest_text)
                 if not isinstance(manifest, dict):
                     raise ValueError("顶层不是 JSON 对象")
+                # v1.1 manifest 区分“用户选择”与“Resolver 最终应用”；旧 v1.0 继续回退 selected。
+                applied_items = manifest.get("resolved")
+                if not isinstance(applied_items, list):
+                    applied_items = manifest.get("selected", [])
                 module_ids = [
-                    str(item.get("id")) for item in manifest.get("selected", [])
+                    str(item.get("id")) for item in applied_items
                     if isinstance(item, dict) and item.get("id")
                 ]
+                render_profile = str(manifest.get("render_profile") or "standard")
+                module_set_sha256 = str(manifest.get("module_set_sha256") or "").strip()
+                rendered_system_sha256 = str(manifest.get("rendered_system_sha256") or "").strip()
+                module_notes.append(
+                    "[模块渲染] "
+                    f"档位={render_profile}；"
+                    f"模块集合={module_set_sha256 or '旧清单未记录'}；"
+                    f"规则文本={rendered_system_sha256 or '旧清单未记录'}"
+                )
                 manifest_scope = str(manifest.get("scope") or "全部")
                 if manifest_scope != "全部" and manifest_scope.casefold() != str(task_type).casefold():
                     module_notes.append(
@@ -1671,6 +2260,7 @@ class MiniMaxH3PromptDirector:
                 reason, api_called=api_called,
                 reference_sheet=reference_sheet, prompt_ir=prompt_ir,
             )
+        media_prepare_started = time.perf_counter()
         # 收集参考图：按已连接素材密集编号，确保与官方动态端口的展示顺序一致。
         images = []
         image_inputs = []
@@ -1703,12 +2293,27 @@ class MiniMaxH3PromptDirector:
         # 独立收集参考视频抽帧：它们共同对应 <Video 1>，不能占用 <Picture N> 标签。
         sequence_frames = []
         sequence_total = 0
+        sequence_input_total = 0
         sequence_selection_note = ""
+        timeline_manifest = {}
         sequence_input = kwargs.get("video_frame_sequence")
+        timeline_text = str(kwargs.get("video_timeline_manifest") or "").strip()
+        if native_video_source is not None and sequence_input is not None:
+            raise RuntimeError(
+                "Gemini 原生视频与参考视频 IMAGE 帧批次不能同时连接；请断开其中一路后做 A/B"
+            )
         if sequence_input is not None:
             try:
+                requested_frame_limit = min(600, max(1, int(frame_sequence_limit or 1)))
+                effective_frame_limit = requested_frame_limit
+                if requested_frame_limit > 300 and not is_deepseek:
+                    effective_frame_limit = 300
+                    runtime_notes.append(
+                        f"[帧数上限] {requested_frame_limit} 是 DeepSeek 边界实验档；"
+                        "当前连接不是官方 DeepSeek，已收敛到 300。"
+                    )
                 sequence_frames, sequence_total, sequence_selection_note = _image_batch_to_data_urls(
-                    sequence_input, limit=frame_sequence_limit,
+                    sequence_input, limit=effective_frame_limit,
                     selection_mode=frame_selection_mode,
                     selection_spec=frame_selection_spec,
                     max_payload_bytes=(
@@ -1722,10 +2327,50 @@ class MiniMaxH3PromptDirector:
                     ),
                     adaptive=(is_deepseek or is_gemini),
                 )
+                sequence_input_total = sequence_total
+                if timeline_text:
+                    timeline_manifest = _parse_timeline_manifest(
+                        timeline_text, input_frame_count=sequence_input_total,
+                    )
+                    remapped = []
+                    for local_index, data_url in sequence_frames:
+                        remapped.append((
+                            int(timeline_manifest["frames"][local_index]["frame"]), data_url,
+                        ))
+                    sequence_frames = remapped
+                    sequence_total = int(timeline_manifest["total_frames"])
+                    runtime_notes.append(
+                        f"[时间线 manifest] 已恢复源视频 fps={timeline_manifest['fps']:g}、"
+                        f"时长={timeline_manifest['duration_seconds']:.3f}s、"
+                        f"源帧总数={sequence_total}；导演二次选帧仍使用真实源索引。"
+                    )
+                if is_deepseek and requested_frame_limit > 300:
+                    runtime_notes.append(
+                        f"[DeepSeek 600 帧边界实验] 请求上限={requested_frame_limit}，"
+                        f"实际编码并准备发送={len(sequence_frames)}；"
+                        "最终以报告中的 payload、prompt token 与 transport 耗时为准。"
+                    )
                 if sequence_selection_note.startswith("[选择回退]"):
                     module_notes.append(f"[序列帧警告] {sequence_selection_note}")
             except (TypeError, ValueError) as exc:
                 module_notes.append(f"[序列帧警告] 无法读取参考视频抽帧：{exc}")
+        elif timeline_text:
+            try:
+                timeline_manifest = _parse_timeline_manifest(timeline_text)
+                runtime_notes.append(
+                    f"[时间线 manifest] 已接入原生视频辅助时间轴：fps={timeline_manifest['fps']:g}，"
+                    f"时长={timeline_manifest['duration_seconds']:.3f}s，"
+                    f"切镜段={len(timeline_manifest['segments'])}。"
+                )
+            except ValueError as exc:
+                module_notes.append(f"[时间线警告] 已忽略无效 manifest：{exc}")
+        media_prepare_ms = round((time.perf_counter() - media_prepare_started) * 1000)
+        runtime_notes.append(f"[本地媒体预处理] {media_prepare_ms / 1000:.2f}s。")
+        module_notes.extend(_user_media_reference_notes(
+            prompt,
+            len(images),
+            bool(sequence_input is not None or native_video_source is not None),
+        ))
 
         if len(images) > 1 and task_type != "Ref2VA":
             module_notes.append(
@@ -1749,12 +2394,13 @@ class MiniMaxH3PromptDirector:
             # DeepSeek 大量连续帧 auto 默认同次联合理解，避免阶段摘要被误当成新开场；
             # 用户仍可显式选择 staged 做同素材 A/B。本地模型沿用原分阶段策略。
             staged = (len(images) >= 3 or bool(sequence_frames)) and not (
-                (is_deepseek or is_gemini) and bool(sequence_frames)
+                (is_deepseek or is_gemini) and (bool(sequence_frames) or native_video_source is not None)
             )
-            if (is_deepseek or is_gemini) and sequence_frames:
+            if (is_deepseek or is_gemini) and (sequence_frames or native_video_source is not None):
                 provider_name = "DeepSeek" if is_deepseek else "Gemini"
+                media_name = "<Video 1> 原生视频" if native_video_source is not None else "<Video 1> 连续帧"
                 runtime_notes.append(
-                    f"[{provider_name} 多帧] auto 已选择 single：目标参考图与 <Video 1> 连续帧同次发送；"
+                    f"[{provider_name} 视频] auto 已选择 single：目标参考图与 {media_name} 同次发送；"
                     "可显式改为 staged 做 A/B。"
                 )
 
@@ -1793,6 +2439,13 @@ class MiniMaxH3PromptDirector:
             resolved_profile = "deepseek_vision"
         if str(model_profile or "auto").strip().lower() == "auto" and is_gemini:
             resolved_profile = "gemini_vision"
+        if str(model_profile or "auto").strip().lower() == "auto" and is_anthropic:
+            resolved_profile = "claude_vision"
+        if str(model_profile or "auto").strip().lower() == "auto" and (
+            is_volcengine or is_zhipu or is_minimax
+        ):
+            # 自定义 OpenAI 兼容（custom）host 无法识别，其 profile 由 preset 显式指定。
+            resolved_profile = "openai_compat_vision"
         compat = _MODEL_COMPAT[resolved_profile]
         # 防幻觉条款：按实际媒体证据状态声明（Easy 插件 nodes.py:753-764 先例改编）
         evidence_parts = []
@@ -1814,7 +2467,14 @@ class MiniMaxH3PromptDirector:
                     "动作阶段与真实切镜点；相邻近似帧不是独立分镜，禁止逐帧复述、禁止新增或"
                     "重绘开头，也禁止把后续任意帧改成新的首镜。"
                 )
-        if task_type == "Ref2VA" and images and sequence_frames:
+        if native_video_source is not None:
+            evidence_parts.append(
+                "本次请求附带一个 Gemini 原生 <Video 1> 文件；它是一条连续视频时间线，"
+                "包含原文件中的画面、时间顺序与音频（若源文件具有音轨），不是独立图片集合。"
+                "只从该视频保留动作、姿势顺序、场景、镜头、声音和待替换源表演者的位置；"
+                "除非用户明确要求，否则不得把源表演者身份或服装写入目标主体。"
+            )
+        if task_type == "Ref2VA" and images and (sequence_frames or native_video_source is not None):
             evidence_parts.append(
                 "若用户意图是人物替换或视频动作迁移：必须在 subject_definitions 中用可观察到的"
                 "发型、脸部/眼睛、体型、服装和 3–5 个身份关键特征，明确把目标 <Subject N> 绑定到"
@@ -1867,6 +2527,16 @@ class MiniMaxH3PromptDirector:
             "video_input_frame_count": sequence_total,
             "frame_selection_mode": str(frame_selection_mode or ""),
             "frame_selection_spec": str(frame_selection_spec or ""),
+            "native_video": (
+                {
+                    "source_fingerprint": str(native_video_source.get("source_fingerprint") or ""),
+                    "size_bytes": int(native_video_source.get("size_bytes") or 0),
+                    "mime_type": str(native_video_source.get("mime_type") or ""),
+                    "requested_route": gemini_video_route,
+                    "requested_fps": gemini_video_fps,
+                }
+                if isinstance(native_video_source, dict) else None
+            ),
         }
         input_fingerprints = {
             "prompt_sha256": _sha256_text(prompt),
@@ -1939,17 +2609,52 @@ class MiniMaxH3PromptDirector:
                     "不要逐帧复述，不得重绘、新增或重设计开头。"
                 ),
             })
+            timeline_by_source = {
+                int(item["frame"]): item for item in timeline_manifest.get("frames", [])
+            } if timeline_manifest else {}
             for sequence_ordinal, (source_index, data_url) in enumerate(sequence_frames, start=1):
                 position = 0.0 if sequence_total <= 1 else source_index / (sequence_total - 1)
+                timeline_item = timeline_by_source.get(int(source_index), {})
+                timecode_note = (
+                    f"，时间码 {timeline_item.get('timecode')}"
+                    if timeline_item.get("timecode") else ""
+                )
                 user_content.append({
                     "type": "text",
                     "text": (
                         f"<Video 1> 代表帧 {sequence_ordinal}/{len(sequence_frames)}："
                         f"输入序列索引 {source_index}/{sequence_total - 1}，"
-                        f"约位于时间线 {position:.0%}。"
+                        f"约位于时间线 {position:.0%}{timecode_note}。"
                     ),
                 })
                 user_content.append({"type": "image_url", "image_url": {"url": data_url}})
+        if native_video_source is not None:
+            timeline_hint = ""
+            if timeline_manifest:
+                segment_hint = ", ".join(
+                    f"段{item['segment']} {item['start_sec']:.3f}-{item['end_sec']:.3f}s"
+                    for item in timeline_manifest.get("segments", [])[:12]
+                )
+                timeline_hint = (
+                    f" 辅助确定性时间轴：fps={timeline_manifest['fps']:g}，"
+                    f"时长={timeline_manifest['duration_seconds']:.3f}s"
+                    + (f"，切镜段={segment_hint}" if segment_hint else "")
+                    + "。"
+                )
+            user_content.append({
+                "type": "text",
+                "text": (
+                    "以下原生视频文件是同一个 <Video 1>。按完整时间顺序理解动作流、真实切镜、"
+                    "背景连续性和音频；不要逐帧复述，不得新增、重绘或重设计开头。"
+                    + timeline_hint
+                ),
+            })
+            user_content.append({
+                "type": "gemini_video_file",
+                "source": native_video_source,
+                "route": gemini_video_route,
+                "fps": gemini_video_fps,
+            })
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
@@ -2000,6 +2705,23 @@ class MiniMaxH3PromptDirector:
                     LOGGER.warning("MiniMax H3 PromptDirector: 失败清理时卸载异常: %s", unload_exc)
             return fail_or_passthrough(f"API/解析失败: {exc}", api_called=True)
 
+        native_video_meta = dict(getattr(raw, "media_meta", {}) or {})
+        if native_video_meta:
+            runtime_notes.append(
+                "[Gemini 原生视频] "
+                f"route={native_video_meta.get('route', '?')}，"
+                f"reason={native_video_meta.get('route_reason', '?')}，"
+                f"size={int(native_video_meta.get('size_bytes') or 0) / 1024 / 1024:.2f} MiB，"
+                f"inline_estimate={int(native_video_meta.get('inline_total_estimated_bytes') or 0) / 1024 / 1024:.2f} MiB，"
+                f"fps={native_video_meta.get('fps', '?')}"
+                f"（{native_video_meta.get('fps_source', '?')}），"
+                f"prepare={int(native_video_meta.get('prepare_total_ms') or 0) / 1000:.2f}s，"
+                f"upload={int(native_video_meta.get('upload_ms') or 0) / 1000:.2f}s，"
+                f"processing_wait={int(native_video_meta.get('processing_wait_ms') or 0) / 1000:.2f}s，"
+                f"remote_cleanup={native_video_meta.get('remote_cleanup', '?')}，"
+                f"content_sha256={native_video_meta.get('content_sha256', '?')}。"
+            )
+
         # LM Studio 跑完卸载（调用后，非 keep_loaded 时）
         if lmstudio_after_use != "keep_loaded" and lm_root:
             try:
@@ -2030,12 +2752,25 @@ class MiniMaxH3PromptDirector:
             sheet_payload["video_frame_sequence"] = {
                 "h3_label": "<Video 1>",
                 "input_frame_count": sequence_total,
+                "director_input_frame_count": sequence_input_total,
                 "sent_frame_count": len(sequence_frames),
                 "selected_indices": [idx for idx, _ in sequence_frames],
                 "selection_mode": frame_selection_mode,
                 "selection_spec": str(frame_selection_spec or ""),
                 "selection_note": sequence_selection_note,
                 "note": "API 时间线证据；不占用 Picture 标签，也不会自动传给 H3。",
+            }
+            if timeline_manifest:
+                sheet_payload["video_frame_sequence"]["timeline"] = {
+                    "fps": timeline_manifest.get("fps"),
+                    "duration_seconds": timeline_manifest.get("duration_seconds"),
+                    "segments": timeline_manifest.get("segments", []),
+                }
+        if native_video_meta:
+            sheet_payload["native_video"] = {
+                "h3_label": "<Video 1>",
+                **native_video_meta,
+                "note": "Gemini 原生视频证据；远端 URI 与本地绝对路径不会写入输出。",
             }
         if sequence_sheet:
             sheet_payload["video_sequence_analysis"] = sequence_sheet
@@ -2064,10 +2799,15 @@ class MiniMaxH3PromptDirector:
                 "共同对应 <Video 1>，不占 Picture 标签）"
                 if sequence_frames else "参考视频序列帧=0 张"
             ),
+            (
+                f"Gemini 原生视频=已发送（route={native_video_meta.get('route')}，"
+                f"{int(native_video_meta.get('size_bytes') or 0) / 1024 / 1024:.2f} MiB）"
+                if native_video_meta else "Gemini 原生视频=未连接"
+            ),
             f"分析模式={'staged' if staged else 'single'}",
             f"已应用模块={module_ids or '无'}",
             *runtime_notes,
-            f"分镜={shots_out} 段  API 耗时={time.time() - t0:.1f}s",
+            f"分镜={shots_out} 段  节点端到端耗时={time.time() - t0:.1f}s",
             *lm_notes,
             *module_notes,
             "提示：本节点的图片输入只供提示词 API 识图，不会给 H3 加条件；图片/视频/音频必须另接官方生成节点。",
@@ -2084,36 +2824,161 @@ class MiniMaxH3PromptDirector:
         return (enhanced, report, sheet_out, ir_json)
 
 
-_CLOUD_DIRECTOR_PRESETS = {
-    # Keep provider-specific wire details out of the node surface.  Future
-    # providers should be added as another reviewed preset/adapter instead of
-    # growing a second copy of PromptDirector's media and Prompt IR pipeline.
-    "deepseek": {
-        "provider": "deepseek",
-        "provider_label": "DeepSeek",
-        "base_url": "https://api.deepseek.com",
-        "credential_id": "deepseek_default",
-        "environment_variable": "DEEPSEEK_API_KEY",
-        "default_model": "deepseek-v4-flash-vision-exp",
-        "model_profile": "deepseek_vision",
-        "json_mode": "force",
-        "api_failure_policy": "stop",
-    },
-    "gemini": {
-        "provider": "gemini",
-        "provider_label": "Gemini",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "credential_id": "gemini_default",
-        "environment_variable": "GEMINI_API_KEY",
-        # 2026-08-25 AA-Codex strict-schema 30/30; current official model page
-        # confirms image/video input and a 65,536-token output limit.  More
-        # expensive Flash/Pro models remain explicit A/B overrides, not defaults.
-        "default_model": "gemini-3.1-flash-lite",
-        "model_profile": "gemini_vision",
-        "json_mode": "force",
-        "api_failure_policy": "stop",
-    },
-}
+def _build_cloud_presets() -> dict:
+    """构建云端连接预设，并让每个预设绑定 registry 能力 profile。
+
+    连接层（base_url/credential/environment_variable/json_mode/api_failure_policy）
+    留在本文件；能力声明（provider/wire/model/evidence/modalities/structured_output/
+    reasoning/media_limits）以 provider_registry 的 CapabilityProfile 为**单一来源**。
+    `capability_profile_id` 即两者绑定键，任何连接预设都必须能经
+    `profile_for_preset()` 解析到已注册能力；否则在加载期直接报错，避免
+    「连接层声称支持某能力但能力层无对应 profile」的漂移。
+
+    备注：连接层的 `model_profile`（提示词纪律，见 _MODEL_COMPAT）与能力层的
+    `wire`/`model` 是两个不同维度——前者是业务提示词口径，后者是 wire 能力口径，
+    不应混用，故连接预设仍保留 model_profile。
+    """
+    registry = _load_provider_registry()
+    presets = {
+        "deepseek": {
+            "provider": "deepseek",
+            "provider_label": "DeepSeek",
+            "base_url": "https://api.deepseek.com",
+            "credential_id": "deepseek_default",
+            "environment_variable": "DEEPSEEK_API_KEY",
+            "default_model": "deepseek-v4-flash-vision-exp",
+            "model_profile": "deepseek_vision",
+            "json_mode": "force",
+            "api_failure_policy": "stop",
+            # Prompt IR 的业务预算，不等于供应商或模型宣传的理论最大输出。
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": False,
+        },
+        "gemini": {
+            "provider": "gemini",
+            "provider_label": "Gemini",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "credential_id": "gemini_default",
+            "environment_variable": "GEMINI_API_KEY",
+            # 2026-08-25 AA-Codex strict-schema 30/30; current official model page
+            # confirms image/video input and a 65,536-token output limit.  More
+            # expensive Flash/Pro models remain explicit A/B overrides, not defaults.
+            "default_model": "gemini-3.1-flash-lite",
+            "model_profile": "gemini_vision",
+            "json_mode": "force",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 65536,
+            "is_custom": False,
+        },
+        # 2026-08-28：常用云端视觉模型预设（OpenAI 兼容壳；Claude 走原生 Messages）。
+        # custom 是纯 OpenAI 兼容壳，base_url / model / key 全由用户在节点提供。
+        "doubao": {
+            "provider": "volcengine",
+            "provider_label": "豆包 · 火山方舟",
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "credential_id": "volcengine_default",
+            "environment_variable": "ARK_API_KEY",
+            "default_model": "doubao-seed-evolving",
+            "model_profile": "openai_compat_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": False,
+        },
+        "claude": {
+            "provider": "anthropic",
+            "provider_label": "Claude · Anthropic",
+            "base_url": "https://api.anthropic.com/v1",
+            "credential_id": "anthropic_default",
+            "environment_variable": "ANTHROPIC_API_KEY",
+            "default_model": "claude-sonnet-4-6",
+            "model_profile": "claude_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": False,
+        },
+        "glm": {
+            "provider": "zhipu",
+            "provider_label": "GLM · 智谱",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "credential_id": "zhipu_default",
+            "environment_variable": "ZHIPU_API_KEY",
+            "default_model": "glm-5.3-flash",
+            "model_profile": "openai_compat_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": False,
+        },
+        "minimax": {
+            "provider": "minimax",
+            "provider_label": "MiniMax 官方 LLM",
+            "base_url": "https://api.minimaxi.com/v1",
+            "credential_id": "minimax_default",
+            "environment_variable": "MINIMAX_API_KEY",
+            # 2026-08-28 官方公开文本模型仍为 M2.7/M2.5/M2.x；普通 Chat
+            # 未声明可直接接收本节点的多图输入。保留旧 preset id 只用于给已保存
+            # workflow 一个明确、fail-closed 的迁移错误，不在新节点下拉中展示。
+            "default_model": "MiniMax-M2.7",
+            "model_profile": "openai_compat_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": False,
+            "availability": "hidden_no_vision",
+        },
+        "custom": {
+            "provider": "custom",
+            "provider_label": "自定义 OpenAI 兼容",
+            "base_url": "",   # 由用户在节点 cloud_base_url 填写
+            "credential_id": "custom_default",
+            "environment_variable": "OPENAI_API_KEY",
+            "default_model": "",   # 由用户在节点 api_model 填写
+            "model_profile": "openai_compat_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": True,
+        },
+        "my_presets": {
+            "provider": "custom",
+            "provider_label": "我的预设",
+            "base_url": "",   # 由已保存的「我的预设」决定（my_preset 名）
+            "credential_id": "custom_default",
+            "environment_variable": "OPENAI_API_KEY",
+            "default_model": "",   # 由已保存的预设决定
+            "model_profile": "openai_compat_vision",
+            "json_mode": "auto_retry",
+            "api_failure_policy": "stop",
+            "prompt_ir_max_tokens": 16384,
+            "is_custom": True,
+            "is_my_presets": True,
+            # 只为旧 workflow/API 输入保留；新 UI 已把它并入 custom。
+            "availability": "hidden_legacy",
+        },
+    }
+    # 引用 registry 能力 profile：校验绑定存在，并把 capability_profile_id 写回。
+    for preset_id, item in presets.items():
+        profile = registry.profile_for_preset(preset_id)
+        item["capability_profile_id"] = profile.profile_id
+        # 连接层 default_model 必须与能力层声明一致（custom 例外：model 由用户填，
+        # 此时跳过一致性校验，避免连接层自定义模型与能力层空 model 冲突）。
+        if item["is_custom"]:
+            continue
+        if item["default_model"] != profile.model:
+            raise ValueError(
+                f"cloud preset {preset_id!r} default_model={item['default_model']!r} "
+                f"与 registry profile {profile.profile_id!r} model={profile.model!r} 不一致"
+            )
+    return presets
+
+
+_CLOUD_DIRECTOR_PRESETS = _build_cloud_presets()
+_CLOUD_DIRECTOR_VISIBLE_PRESETS = [
+    preset_id for preset_id, preset in _CLOUD_DIRECTOR_PRESETS.items()
+    if preset.get("availability", "visible") == "visible"
+]
 
 
 class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
@@ -2136,21 +3001,37 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
                 "output_language": (["English", "中文"], {"default": "English"}),
                 # Parameter name stays stable for saved workflow/API compatibility;
                 # the UI presents it as a connection preset rather than raw provider knobs.
-                "cloud_provider": (list(_CLOUD_DIRECTOR_PRESETS), {"default": "deepseek"}),
+                "cloud_provider": (_CLOUD_DIRECTOR_VISIBLE_PRESETS, {"default": "deepseek"}),
                 "api_model": (
                     "STRING",
-                    {"default": "", "placeholder": "留空使用云端预设的模型；仅在需要时覆盖"},
+                    {"default": "", "placeholder": "留空使用云端预设的模型；custom 预设请填模型 ID"},
                 ),
                 "temperature": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 2.0, "step": 0.05}),
                 "max_tokens": ("INT", {"default": 16384, "min": 256, "max": 131072, "step": 1024}),
                 "timeout_s": ("INT", {"default": 600, "min": 30, "max": 1800, "step": 10}),
                 "api_reasoning": (["auto", "off", "on"], {"default": "auto"}),
                 "analysis_mode": (["auto", "single", "staged"], {"default": "auto"}),
-                "frame_sequence_limit": ("INT", {"default": 48, "min": 1, "max": 300, "step": 1}),
+                "frame_sequence_limit": ("INT", {"default": 48, "min": 1, "max": 600, "step": 1}),
                 "frame_selection_mode": (_FRAME_SELECTION_MODES, {"default": "uniform_full"}),
                 "frame_selection_spec": (
                     "STRING",
                     {"default": "", "placeholder": "自定义：0,41,82,-1 或 0,33,66,100"},
+                ),
+                # ComfyUI 按 widgets_values 的位置恢复旧工作流。新增字段必须追加在
+                # 末尾，不能插进 api_model/temperature 等既有字段中间。
+                "cloud_base_url": (
+                    "STRING",
+                    {"default": "", "placeholder": "custom：OpenAI 兼容 Base URL（如 https://api.xxx.com/v1）"},
+                ),
+                "my_preset": (
+                    "STRING",
+                    {"default": "", "placeholder": "我的预设：由底部管理器选择，或手动填已保存名称"},
+                ),
+                "gemini_video_route": (
+                    ["auto", "inline", "file_api"], {"default": "auto"},
+                ),
+                "gemini_video_fps": (
+                    "FLOAT", {"default": 0.0, "min": 0.0, "max": 24.0, "step": 1.0},
                 ),
             },
             "optional": {
@@ -2161,6 +3042,17 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
                 "video_frame_sequence": (
                     "IMAGE",
                     {"label": "参考视频抽帧 / 图像序列（批次；仅供云端 API，不传给 H3）"},
+                ),
+                "cloud_video": (
+                    "MINIMAX_H3_CLOUD_VIDEO",
+                    {"label": "Gemini 原生视频（与视频帧二选一；仅供云端 API）"},
+                ),
+                "comfy_video": (
+                    "VIDEO",
+                    {"label": "Comfy 原生 VIDEO（未裁剪文件；与上两路二选一）"},
+                ),
+                "video_timeline_manifest": (
+                    "STRING", {"multiline": True, "default": "", "forceInput": True},
                 ),
                 "system_module": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
                 "module_manifest": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
@@ -2176,39 +3068,125 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
                      output_language, cloud_provider, api_model, temperature, max_tokens,
                      timeout_s, api_reasoning="auto", analysis_mode="auto",
                      frame_sequence_limit=48, frame_selection_mode="uniform_full",
-                     frame_selection_spec="", **kwargs):
+                     frame_selection_spec="", cloud_base_url="", my_preset="",
+                     gemini_video_route="auto", gemini_video_fps=0.0, **kwargs):
+        cloud_video_source = kwargs.pop("cloud_video", None)
+        comfy_video = kwargs.pop("comfy_video", None)
+        if cloud_video_source is not None and comfy_video is not None:
+            raise RuntimeError(
+                "“云端原生视频”与“Comfy 原生 VIDEO”不能同时连接；请保留其中一路"
+            )
+        if comfy_video is not None:
+            cloud_video_source = _load_cloud_video().cloud_video_source_from_comfy_video(
+                comfy_video
+            )
         preset_id = str(cloud_provider or "deepseek").strip().lower()
         preset = _CLOUD_DIRECTOR_PRESETS.get(preset_id)
         if preset is None:
             raise ValueError(f"未知云端连接预设：{preset_id!r}")
+        if preset.get("availability") == "hidden_no_vision":
+            raise RuntimeError(
+                "MiniMax 官方文本模型预设尚未证明支持本节点所需的多图/视频帧输入，"
+                "已停止请求；请改用已验证的 Gemini、DeepSeek 或 GLM 预设。"
+            )
         provider = preset["provider"]
         provider_label = preset["provider_label"]
-        base_url = preset["base_url"]
-        credential_id = preset["credential_id"]
+        # 已保存连接是 custom 的一种状态，不再作为第二个“供应商”。旧工作流
+        # 仍可传 my_presets，并在这里走同一条兼容路径。
+        my_preset_loaded = None
+        cloud_connection_note = ""
+        preset_name = str(my_preset or "").strip()
+        if preset.get("is_my_presets") or (preset.get("is_custom") and preset_name):
+            if not preset_name:
+                raise ValueError("我的预设需要填写已保存的预设名（my_preset）")
+            creds = _load_cloud_credentials()
+            my_preset_loaded = creds.get_custom_preset(preset_name)
+            base_url = my_preset_loaded["base_url"]
+            cloud_connection_note = (
+                f"[OpenAI 兼容已保存连接] 已加载「{my_preset_loaded['name']}」"
+                f" base_url={base_url}"
+            )
+        elif preset.get("is_custom"):
+            base_url = str(cloud_base_url or "").strip()
+            if not base_url:
+                raise ValueError("自定义 OpenAI 兼容预设需要填写 cloud_base_url")
+        else:
+            base_url = preset["base_url"]
+            cloud_connection_note = ""
+        credential_id = (
+            str(my_preset_loaded.get("credential_id") or preset["credential_id"])
+            if my_preset_loaded else preset["credential_id"]
+        )
         credentials = _load_cloud_credentials()
         key, key_source = credentials.resolve_credential(provider, credential_id)
-        if not key:
+        if not key and my_preset_loaded and credential_id != preset["credential_id"]:
+            # 兼容旧版“我的预设”共用 custom_default 的本地 Key；用户在新管理器
+            # 为该预设保存独立 Key 后自动切换到 per-preset credential。
+            key, key_source = credentials.resolve_credential(provider, preset["credential_id"])
+            if key:
+                cloud_connection_note = (
+                    f"[我的预设]「{my_preset_loaded['name']}」仍在使用旧版共享凭据；"
+                    "建议在预设管理器中为它保存独立 Key。"
+                )
+        allow_local_unauthenticated = bool(
+            preset.get("is_custom") and _is_local_lmstudio_url(base_url)
+        )
+        if not key and allow_local_unauthenticated:
+            key_source = "本机 loopback 无鉴权兼容模式"
+            cloud_connection_note = "；".join(note for note in (
+                cloud_connection_note,
+                "[OpenAI 兼容] 已识别本机 LM Studio：优先复用原生/JIT 自动加载接口，"
+                "失败时回退 OpenAI 兼容接口；日常本地模型仍建议使用“提示词导演（顺序接口）”。",
+            ) if note)
+        elif not key:
             raise RuntimeError(
                 f"MiniMax H3 云端导演尚未配置 {provider_label} 凭据。"
                 "请点击节点底部的‘管理云端连接’，保存到本机用户配置，"
                 f"或在启动 ComfyUI 前设置 {preset['environment_variable']}。"
             )
         model_override = str(api_model or "").strip()
+        if my_preset_loaded:
+            # 已保存连接的 model 由预设决定，避免节点残留覆盖它。
+            model_override = ""
+        elif preset.get("is_custom") and not model_override:
+            raise ValueError("自定义 OpenAI 兼容预设需要填写 api_model（模型 ID）")
         other_preset_defaults = {
             str(item.get("default_model") or "")
             for item_id, item in _CLOUD_DIRECTOR_PRESETS.items()
             if item_id != preset_id
         }
-        cloud_connection_note = ""
         if model_override in other_preset_defaults:
             cloud_connection_note = (
                 f"[云端预设] 忽略来自另一连接预设的旧模型覆盖 {model_override!r}；"
                 f"已使用 {provider_label} 默认模型。"
             )
             model_override = ""
-        model = model_override or preset["default_model"]
+        # 我的预设：model 由已保存预设指定（覆盖 api_model 留空的情形）。
+        if my_preset_loaded:
+            model = my_preset_loaded["model"]
+            loaded_note = (
+                f"[我的预设]「{my_preset_loaded['name']}」"
+                f"base_url={my_preset_loaded['base_url']} model={my_preset_loaded['model']}"
+            )
+            cloud_connection_note = "；".join(
+                note for note in (cloud_connection_note, loaded_note) if note
+            )
+        else:
+            model = model_override or preset["default_model"]
         if not model:
             raise ValueError("所选云端连接预设没有默认模型，请填写模型 ID 覆盖")
+        try:
+            requested_tokens = int(max_tokens)
+        except (TypeError, ValueError):
+            requested_tokens = 16384
+        prompt_ir_cap = max(256, int(preset.get("prompt_ir_max_tokens") or 16384))
+        if requested_tokens > prompt_ir_cap:
+            cloud_connection_note = "；".join(note for note in (
+                cloud_connection_note,
+                f"[云端 Prompt IR 预算] 节点值 {requested_tokens} 已收敛到 {prompt_ir_cap}；"
+                "模型/供应商理论输出上限不直接作为本节点的默认输出预算。",
+            ) if note)
+            max_tokens = prompt_ir_cap
         return super().direct(
             prompt=prompt,
             task_type=task_type,
@@ -2235,6 +3213,9 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
             _resolved_api_key=key,
             _resolved_api_key_source=key_source,
             _cloud_connection_note=cloud_connection_note,
+            _cloud_video=cloud_video_source,
+            _gemini_video_route=gemini_video_route,
+            _gemini_video_fps=gemini_video_fps,
             **kwargs,
         )
 

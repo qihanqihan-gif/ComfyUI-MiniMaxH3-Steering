@@ -1,0 +1,49 @@
+{
+  "id": "dialogue_performance",
+  "title_zh": "对白表演与口型",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "dialogue",
+  "source": "MiniMax-H3 official dialogue and native-audio prompt guidance",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["verbatim_dialogue", "speaker_mapping", "lip_timing", "listener_reaction"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "将用户逐字对白映射到稳定发声者，并让口型、视线、表情、手势和聆听反应随时间同步。",
+    "adds": [
+      {"path": "audio.dialogue.performance.primary", "value": "speaker_timed_lips_gaze_expression_and_listener_reaction"}
+    ],
+    "preserves": [
+      "dialogue.verbatim",
+      "dialogue.original_language",
+      "audio.speaker_mapping",
+      "subject.identity",
+      "timeline.dialogue_order",
+      "visible_text.verbatim"
+    ],
+    "forbids": [
+      "translate_rewrite_or_invent_dialogue",
+      "speaker_identity_switch",
+      "lip_motion_on_silent_visible_subject",
+      "unrequested_overlapping_speech",
+      "speaker_assignment_to_non_voice_sound"
+    ],
+    "defaults": [
+      {"path": "dialogue.overlap", "value": "none_unless_requested"},
+      {"path": "listener.reaction", "value": "subtle_and_timed"}
+    ]
+  },
+  "ownership": {
+    "reads": ["dialogue.user_text", "dialogue.speakers", "timeline.dialogue_order", "subject.identities"],
+    "writes": ["audio.dialogue.performance.primary"],
+    "augments": ["performance.lip_timing", "performance.gaze_expression_gesture", "performance.listener_reaction"]
+  },
+  "resolution": {
+    "exclusive_group": "audio.dialogue.performance.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "对白表演与口型规则：用户对白逐字保留原语言，不翻译、不润色、不补句；具体说话人编号和输出位置交由核心协议。\n1. 为每句对白写清真实发声角色、开始与结束时点、停顿、重音和情绪方向，同一发声者全片保持稳定映射。\n2. 说话时同步描述可见口型开合、视线对象、表情路径和少量手势，口型只在真实发声区间发生；画外旁白期间，可见且未说话人物保持闭口。\n3. 未发声角色以眨眼、呼吸、视线转移或轻微姿势变化回应，不抢夺对白主体。多人轮流说话默认顺序清楚、互不重叠，只有用户明确要求打断、合唱或齐声时才允许重叠。\n4. 跨镜延续对白时保持声音、角色映射和情绪连续，不为沉默人物、环境声或道具声创建发声者。"
+}

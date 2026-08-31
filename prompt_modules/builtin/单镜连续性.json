@@ -1,0 +1,44 @@
+{
+  "id": "single_shot_continuity",
+  "title_zh": "单镜连续性",
+  "version": 3,
+  "scope": "全部",
+  "category": "timeline",
+  "source": "MiniMax-H3 official shot syntax + project continuity regression plan",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["single_shot", "continuity", "action_arc", "spatial_consistency"],
+  "conflicts": ["storyboard_reference_map"],
+  "semantic_contract": {
+    "purpose": "让完整动作在一个连续镜头和可解释的连续空间内完成。",
+    "adds": [
+      {"path": "timeline.layout.primary", "value": "single_continuous_shot"}
+    ],
+    "preserves": [
+      "continuity.space",
+      "continuity.screen_direction",
+      "continuity.subject_position",
+      "continuity.props",
+      "continuity.lighting"
+    ],
+    "forbids": [
+      "cuts",
+      "montage",
+      "teleportation",
+      "unmotivated_background_reconstruction"
+    ],
+    "defaults": []
+  },
+  "ownership": {
+    "reads": ["task.duration"],
+    "writes": ["timeline.layout.primary"],
+    "augments": ["continuity.spatial", "continuity.visual"]
+  },
+  "resolution": {
+    "exclusive_group": "timeline.layout.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": ["storyboard_reference_map"]
+  },
+  "instructions": "单镜连续性规则：全片只规划一个连续镜头；具体字段、镜头标签和时间格式仍由核心协议与编译器生成。\n1. 在同一可解释空间内写清起始状态、主要动作和结束状态，以及主体的位置、朝向、移动路径和遮挡关系。\n2. 镜头可以静止，也可以采用另一个已生效规则指定的主运镜，但运动必须连续，不能依靠切镜、蒙太奇或突然换机位完成动作。\n3. 保持屏幕方向、人物相对位置、道具状态、光源方向和背景结构连续；转身、离画、再入画或遮挡后重现都要有可追踪路径。\n4. 不生成第二镜头，不使用 cuts to、switches to、montage 等切镜意图，也不以瞬移、角色换边或背景重构伪装连续性。"
+}

@@ -1,12 +1,28 @@
 {
   "id": "single_shot_continuity",
   "title_zh": "单镜连续性",
-  "version": 1,
+  "version": 2,
   "scope": "全部",
+  "category": "timeline",
   "source": "MiniMax-H3 official shot syntax + project continuity regression plan",
   "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
   "evidence_level": "official_aligned",
   "features": ["single_shot", "continuity", "action_arc", "spatial_consistency"],
   "conflicts": ["storyboard_reference_map"],
+  "semantic_contract": {
+    "shot_structure": "single_continuous_shot",
+    "continuity": ["space", "screen_direction", "props", "lighting"]
+  },
+  "ownership": {
+    "reads": ["task.duration"],
+    "writes": ["timeline.layout.primary"],
+    "augments": ["continuity.spatial", "continuity.visual"]
+  },
+  "resolution": {
+    "exclusive_group": "timeline.layout.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": ["storyboard_reference_map"]
+  },
   "instructions": "单镜连续性策略。\n1. 全片只使用 [Shot 1]，不写后续时间戳；在一个连续空间内完成起始状态、主要动作和结束状态。\n2. 写清主体相对场景的位置、朝向、移动路径和遮挡关系，避免瞬移、换边或背景重构。\n3. 镜头若移动，说明它如何连续跟随或揭示；镜头若静止，说明动作如何在画框内完成。\n4. 外观、道具、光源方向和环境状态在动作前后保持可解释的连续性。\n5. 不用 cuts to、switches to、montage 或其他切镜词。"
 }

@@ -1,0 +1,48 @@
+{
+  "id": "motion_emphasis",
+  "title_zh": "动作强化",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "motion",
+  "source": "MiniMax-H3 official temporal prompt guidance + project action readability heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["primary_action", "contact_and_force", "readable_phases", "secondary_motion"],
+  "conflicts": ["subtle_still_motion", "live_wallpaper"],
+  "semantic_contract": {
+    "purpose": "把一个主动作拆成可读的起势、路径、接触/发力和收势，并补充少量受力一致的次级运动。",
+    "adds": [
+      {"path": "motion.action.primary", "value": "readable_start_path_contact_force_and_end_state"}
+    ],
+    "preserves": [
+      "subject.identity",
+      "subject.anatomical_and_costume_continuity",
+      "camera.motion.primary",
+      "timeline.layout.primary",
+      "scene.spatial_logic"
+    ],
+    "forbids": [
+      "multiple_competing_primary_actions",
+      "contact_without_explicit_point_and_force_response",
+      "camera_motion_substituting_for_subject_action",
+      "secondary_motion_overpowering_primary_action",
+      "risk_irrelevant_negative_prompt_stack"
+    ],
+    "defaults": [
+      {"path": "motion.action.count", "value": 1},
+      {"path": "motion.secondary", "value": "few_force_consistent_elements"}
+    ]
+  },
+  "ownership": {
+    "reads": ["user.action_intent", "subject.start_state", "scene.spatial_logic", "camera.motion.primary"],
+    "writes": ["motion.action.primary"],
+    "augments": ["motion.contact_and_force", "motion.secondary", "continuity.end_state"]
+  },
+  "resolution": {
+    "exclusive_group": "motion.action.primary",
+    "priority": 55,
+    "requires": [],
+    "conflicts": ["subtle_still_motion", "live_wallpaper"]
+  },
+  "instructions": "动作强化规则：只强化一个主动作的身体逻辑和可读性，不把镜头移动当成主体动作，也不接管已选主运镜。\n1. 依次写清起始姿态与重心、准备动作、运动方向与路径、速度变化、接触/发力瞬间、受力反馈和结束状态，使当前时长内动作完整闭合。\n2. 舞蹈、打斗、运动或操作道具时，用具体方向、距离、重量感和节奏替代笼统的“快速移动”；身体或物体接触必须说明接触点、先后顺序与双方反馈。\n3. 只添加少量与发力一致的头发、衣料、尘土、液体或道具惯性，不能让次级运动盖过主动作。\n4. 沿用其它规则的主运镜、时间结构和身份策略；肢体融合、穿模或身份交换等限制只在当前动作确有风险时加入。"
+}

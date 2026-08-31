@@ -1,0 +1,51 @@
+{
+  "id": "scene_3d_animation",
+  "title_zh": "3D 动画短片",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: 3d-animation-short-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/3d-animation-short-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["stylized_3d", "character_performance", "material_rendering", "single_clip_recipe"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "把当前短片组织成身份稳定、体积清楚、动作可读的风格化 3D 动画节拍，不承担完整动画片生产流程。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "stylized_3d_short"},
+      {"path": "visual.medium.primary", "value": "stylized_3d_animation"},
+      {"path": "performance.animation", "value": "readable_anticipation_follow_through_and_expression"}
+    ],
+    "preserves": [
+      "subject.identity",
+      "subject.signature_features",
+      "scene.spatial_layout",
+      "camera.motion.primary",
+      "timeline.layout.primary",
+      "visible_text.verbatim"
+    ],
+    "forbids": [
+      "unrequested_studio_or_renderer_imitation",
+      "identity_or_joint_discontinuity",
+      "waxy_plastic_materials",
+      "lifeless_expression",
+      "accidental_photoreal_live_action_or_flat_2d"
+    ],
+    "defaults": [
+      {"path": "visual.style", "value": "warm_stylized_3d"},
+      {"path": "performance.energy", "value": "expressive_but_readable"}
+    ]
+  },
+  "ownership": {
+    "reads": ["user.visual_style", "subject.identity", "subject.materials", "scene.environment"],
+    "writes": ["scene.recipe.primary", "visual.medium.primary"],
+    "augments": ["performance.animation", "visual.material_response", "visual.volume_lighting"]
+  },
+  "resolution": {
+    "exclusive_group": ["scene.recipe.primary", "visual.medium.primary"],
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "风格化 3D 动画短片配方：只组织当前时长内可完成的一个动作或情绪节拍。\n1. 先沿用用户指定的 3D 方向；未指定时采用温暖、风格化且不对应任何商业工作室或渲染器的视觉语言。\n2. 写清角色比例与剪影、皮肤/毛发/服装/道具的材质反应，以及主光如何塑造体积；身份特征、服装配色、关节关系和场景地标保持连续。\n3. 表演用准备动作、清楚动作线、挤压拉伸、跟随动作和可读的眉眼口型变化建立节奏，强情绪也不能破坏角色辨识。\n4. 保留其它规则已指定的主运镜和时间结构，不额外扩写当前片段之外的内容。防止塑料皮肤、木偶僵硬、表情失活，以及无意转为真人实拍或扁平二维。"
+}

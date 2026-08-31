@@ -1,0 +1,13 @@
+{
+  "id": "shot_timeline",
+  "title_zh": "时间码分镜规则",
+  "version": 2,
+  "scope": "全部",
+  "deprecated": true,
+  "source": "Superseded by protocol_base, protocol_ref and the local H3 compiler",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_protocol",
+  "features": ["legacy_alias"],
+  "conflicts": [],
+  "instructions": "【旧版兼容文件，不再列为可选模块】镜头格式由自动协议与 h3_compiler 统一处理：[Shot 1] 无时间戳，后续只使用 [Shot N] At MM:SS.mmm。"
+}

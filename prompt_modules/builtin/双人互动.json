@@ -1,0 +1,48 @@
+{
+  "id": "two_person_interaction",
+  "title_zh": "双人互动",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "interaction",
+  "source": "MiniMax-H3 official prompt structure + project multi-subject interaction heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["spatial_blocking", "gaze_target", "contact_sequence", "speaker_separation"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "为双人或多人镜头建立明确的空间阻挡、视线、移动路径和接触先后，不改写各自身份。",
+    "adds": [
+      {"path": "interaction.blocking.primary", "value": "distinct_positions_paths_gaze_and_contact_order"}
+    ],
+    "preserves": [
+      "subject.each_identity",
+      "subject.each_costume_and_role",
+      "dialogue.verbatim",
+      "audio.speaker_mapping",
+      "camera.motion.primary",
+      "timeline.layout.primary"
+    ],
+    "forbids": [
+      "identity_or_role_swap",
+      "body_fusion_or_unmotivated_intersection",
+      "ambiguous_contact_point_or_force_response",
+      "gaze_target_mismatch",
+      "speaker_mapping_for_silent_subject"
+    ],
+    "defaults": [
+      {"path": "interaction.blocking", "value": "distinct_screen_regions_and_readable_distance"}
+    ]
+  },
+  "ownership": {
+    "reads": ["subject.identities", "subject.roles", "user.interaction_intent", "dialogue.speakers"],
+    "writes": ["interaction.blocking.primary"],
+    "augments": ["interaction.contact_sequence", "interaction.gaze", "audio.speaker_separation"]
+  },
+  "resolution": {
+    "exclusive_group": "interaction.blocking.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "双人或多人互动规则：只负责空间阻挡、视线、移动路径和接触顺序，各角色身份、服装、台词与用户指定角色关系保持不变。\n1. 开始时写清每个人的画面区域、前中后景、朝向、相互距离、视线对象和手脚所在位置；移动时分别描述各自路径，避免只写“两人互动”。\n2. 牵手、拥抱、搀扶、递物、推拉或对打必须分解为接近 → 接触点建立 → 发力/承重 → 反馈 → 分离或稳定状态，注明由谁先动作、哪个身体部位或道具接触。\n3. 有对白时保持真实发声者与角色映射稳定，沉默角色只做自然聆听反应；具体说话人格式由核心协议处理。\n4. 仅在当前风险相关时限制身份交换、身体融合、穿插或视线错配，不堆叠与场景无关的负面词。"
+}

@@ -1,12 +1,29 @@
 {
   "id": "storyboard_reference_map",
   "title_zh": "多参考图分镜映射",
-  "version": 1,
+  "version": 2,
   "scope": "Ref2VA",
+  "category": "timeline",
   "source": "MiniMax-H3 official Subject/Picture reference semantics",
   "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
   "evidence_level": "official_aligned",
   "features": ["multi_reference", "storyboard", "subject_picture_separation", "shot_mapping"],
   "conflicts": ["single_shot_continuity", "seamless_loop", "live_wallpaper"],
+  "semantic_contract": {
+    "shot_structure": "multi_shot_reference_map",
+    "reference_policy": "picture_subject_separation",
+    "label_source": "connected_media_only"
+  },
+  "ownership": {
+    "reads": ["media.references"],
+    "writes": ["shot_plan.reference_mapping", "timeline.layout.primary"],
+    "augments": ["subject.reference_bindings"]
+  },
+  "resolution": {
+    "exclusive_group": "timeline.layout.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": ["single_shot_continuity", "seamless_loop", "live_wallpaper"]
+  },
   "instructions": "Ref2VA 多参考分镜映射策略。\n1. 先区分身份与画面：可跨镜复用的人物、物体或场景外观定义为 <Subject N>；只锚定某一镜构图、姿势或画面的素材定义为 <Picture N>。\n2. 为每个计划镜头指定主要标签和用途，避免同一张图同时被误写成互相矛盾的身份与构图要求。\n3. 首次出现时建立必要的可见特征，之后用标签引用；不要逐镜复述全部参考图内容。\n4. 多人物参考要写清各自空间位置和互动关系；相似角色使用不同标签并保持编号稳定。\n5. 只使用实际连接并出现在 reference_manifest 中的标签，不猜测未连接素材。"
 }

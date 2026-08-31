@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """MiniMaxH3PromptDirector 纯函数测试（不发起真实网络请求）。"""
 import importlib.util
+import json
 import os
 import sys
 
@@ -65,6 +66,19 @@ def test_deepseek_dense_batch_uses_adaptive_encoding_profile():
     assert sum(len(url) for _idx, url in frames) <= mod._DEEPSEEK_SEQUENCE_PAYLOAD_BUDGET
 
 
+def test_deepseek_600_frame_boundary_profile_preserves_count_when_budget_allows():
+    mod = _load_mod()
+    batch = torch.zeros((600, 8, 8, 3), dtype=torch.float32)
+    frames, total, note = mod._image_batch_to_data_urls(
+        batch, limit=600, adaptive=True,
+        max_payload_bytes=mod._DEEPSEEK_SEQUENCE_PAYLOAD_BUDGET,
+    )
+    assert total == 600
+    assert len(frames) == 600
+    assert "≤384px/JPEG q68" in note
+    assert sum(len(url) for _idx, url in frames) <= mod._DEEPSEEK_SEQUENCE_PAYLOAD_BUDGET
+
+
 def test_frame_selection_quick_modes_and_safe_fallback():
     mod = _load_mod()
     indices, note = mod._select_frame_indices(124, 4, "uniform_no_edges", "")
@@ -105,6 +119,29 @@ def test_parse_json_invalid_raises():
         assert False, "应抛 ValueError"
     except ValueError:
         pass
+
+
+def test_user_media_reference_notes_are_non_blocking_and_dense():
+    mod = _load_mod()
+    notes = mod._user_media_reference_notes(
+        "use <Picture 1>, <Picture 4> and <Video 2>",
+        picture_count=2,
+        has_video=True,
+    )
+    joined = "\n".join(notes)
+    assert "不存在的 <Picture 4>" in joined
+    assert "未显式引用 <Picture 2>" in joined
+    assert "<Video 2> 与当前视频输入不匹配" in joined
+    assert "未显式写 <Video 1>" in joined
+
+
+def test_user_media_reference_notes_accept_all_connected_labels():
+    mod = _load_mod()
+    assert mod._user_media_reference_notes(
+        "replace <Picture 1> with <Picture 2> while following <Video 1>",
+        picture_count=2,
+        has_video=True,
+    ) == []
 
 
 def test_qwen38_profile_and_split_reasoning_policy():
@@ -301,6 +338,189 @@ def test_call_chat_routes_local_qwen38_final_to_lmstudio_native(monkeypatch):
     assert mod._parse_json_text(raw)["non_diegetic_music"] == "N/A"
 
 
+def test_call_chat_routes_local_analysis_reasoning_to_lmstudio_native(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    def fake_native(base_url, api_key, model, messages, temperature,
+                    max_tokens, timeout_s, reasoning_mode):
+        captured.update({
+            "base_url": base_url,
+            "model": model,
+            "reasoning_mode": reasoning_mode,
+            "messages": messages,
+        })
+        return mod._ChatCompletionText(
+            '{"timeline":[]}', backend="lmstudio_native",
+        )
+
+    monkeypatch.setattr(mod, "_call_lmstudio_native", fake_native)
+    raw = mod._call_chat(
+        "http://127.0.0.1:1234/v1", "", "qwen3.8-27b@q6_k",
+        [{"role": "user", "content": "analyze"}], 0.3, 8192, 30,
+        json_mode="auto_retry", api_reasoning="auto",
+        request_purpose="analysis",
+    )
+    assert captured["base_url"] == "http://127.0.0.1:1234/v1"
+    assert captured["model"] == "qwen3.8-27b@q6_k"
+    assert captured["reasoning_mode"] == "on"
+    assert raw.backend == "lmstudio_native"
+
+
+def test_call_chat_lmstudio_native_failure_falls_back_to_openai_compat(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return __import__("json").dumps({
+                "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                "usage": {},
+            }).encode("utf-8")
+
+    def fail_native(*_args, **_kwargs):
+        raise OSError("native endpoint unavailable")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        captured["url"] = request.full_url
+        captured["payload"] = __import__("json").loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr(mod, "_call_lmstudio_native", fail_native)
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    raw = mod._call_chat(
+        "http://127.0.0.1:1234/v1", "", "qwen3.8-27b@q6_k",
+        [{"role": "user", "content": "analyze"}], 0.3, 8192, 30,
+        json_mode="auto_retry", api_reasoning="auto",
+        request_purpose="analysis",
+    )
+    assert captured["url"] == "http://127.0.0.1:1234/v1/chat/completions"
+    assert captured["payload"]["chat_template_kwargs"] == {"enable_thinking": True}
+    assert raw.backend == "openai_compat"
+
+
+def test_call_chat_local_lmstudio_compat_off_sends_top_level_reasoning_effort_none(monkeypatch):
+    """本地 LM Studio 走 OpenAI-compat 且 off 时，发送顶层 reasoning_effort=none。
+
+    这是比 chat_template_kwargs 更可靠的思考关闭开关；用 json_mode=force 排除原生
+    /api/v1/chat 路径，强制进入 /v1/chat/completions 兼容分支。
+    """
+    mod = _load_mod()
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return __import__("json").dumps({
+                "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                "usage": {},
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        captured["payload"] = __import__("json").loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    mod._call_chat(
+        "http://127.0.0.1:1234/v1", "", "qwen3.8-27b@q6_k",
+        [{"role": "user", "content": "x"}], 0.3, 8192, 30,
+        json_mode="force", api_reasoning="off", request_purpose="final",
+    )
+    assert captured["payload"]["reasoning_effort"] == "none"
+    assert captured["payload"]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert captured["payload"]["messages"][-1]["content"].endswith("/no_think")
+    assert captured["payload"]["response_format"]["type"] == "json_object"
+
+
+def test_call_chat_local_lmstudio_drops_reasoning_effort_on_400(monkeypatch):
+    """服务器拒绝 reasoning_effort（400）时，去掉它重发成功并记录降级。"""
+    mod = _load_mod()
+    bodies = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return __import__("json").dumps({
+                "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                "usage": {},
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        body = bytes(request.data)
+        bodies.append(__import__("json").loads(body))
+        if len(bodies) == 1:
+            raise mod.urllib.error.HTTPError(request.full_url, 400, "bad reasoning_effort", {}, None)
+        return FakeResponse()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    raw = mod._call_chat(
+        "http://127.0.0.1:1234/v1", "", "gemma4@q6_k",
+        [{"role": "user", "content": "x"}], 0.3, 8192, 30,
+        json_mode="force", api_reasoning="off", request_purpose="final",
+    )
+    assert len(bodies) == 2
+    # 第一次带 reasoning_effort，第二次去掉
+    assert bodies[0]["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in bodies[1]
+    # 降级应保留 response_format（force 不降级为无结构输出）
+    assert bodies[1]["response_format"]["type"] == "json_object"
+    assert raw.transport_meta["wire_fallback_dropped"] == ["reasoning_effort"]
+
+
+def test_call_chat_exhausted_wire_fallback_raises_transport_failure(monkeypatch):
+    """400 降级全部失败时不得落入未赋值的 response_bytes。"""
+    mod = _load_mod()
+    calls = []
+
+    def always_reject(_url, body_bytes, _headers, _timeout_s, max_retries=0):
+        del max_retries
+        calls.append(json.loads(body_bytes.decode("utf-8")))
+        raise mod._TransportFailure(
+            "http_4xx_non_retryable", 400,
+            {"request_sha256": f"reject-{len(calls)}", "attempts": [{"result": "failed"}]},
+        )
+
+    monkeypatch.setattr(mod, "_post_json_bytes", always_reject)
+    try:
+        mod._call_chat(
+            "http://127.0.0.1:1234/v1", "", "gemma4@q6_k",
+            [{"role": "user", "content": "x"}], 0.3, 8192, 30,
+            json_mode="force", api_reasoning="off", request_purpose="final",
+        )
+        assert False, "全部降级失败后必须抛出安全传输错误"
+    except mod._TransportFailure as exc:
+        assert exc.status == 400
+        assert "response_bytes" not in str(exc)
+    assert len(calls) == 2
+    assert "reasoning_effort" in calls[0]
+    assert "reasoning_effort" not in calls[1]
+
+
 def test_compose_enhanced_three_part():
     mod = _load_mod()
     parsed = {
@@ -425,6 +645,7 @@ def test_node_registered():
     assert required["output_language"][1]["default"] == "English"
     assert optional["video_frame_sequence"][0] == "IMAGE"
     assert "批次" in optional["video_frame_sequence"][1]["label"]
+    assert optional["video_timeline_manifest"][0] == "STRING"
     assert "system_module" in optional, "应可接提示词模块节点输出"
     assert "module_manifest" in optional, "应可接模块清单用于诊断和 IR 追踪"
     # 旧值必须放行（踩坑速记：COMBO 旧值 VALIDATE_INPUTS 放行）
@@ -557,6 +778,64 @@ def test_direct_module_manifest_is_traced_and_scope_checked(monkeypatch):
     assert "模块作用域=Ref2VA" in report
     assert "product_identity_fidelity" in report
     assert json.loads(prompt_ir)["applied_modules"] == ["product_identity_fidelity"]
+
+
+def test_direct_module_manifest_v11_tracks_only_resolved_modules(monkeypatch):
+    from unittest.mock import MagicMock
+    import json
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value=(
+        '{"integrated_multimodal_description":"[Shot 1] A subject moves.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    )))
+    manifest = json.dumps({
+        "schema_version": "h3_prompt_modules/1.1",
+        "scope": "全部",
+        "selected": [{"id": "natural_camera_follow"}, {"id": "subtle_still_motion"}],
+        "resolved": [{"id": "natural_camera_follow"}],
+        "suppressed": [{"id": "subtle_still_motion", "winner": "natural_camera_follow"}],
+        "issues": [],
+    })
+    _, report, _, prompt_ir = mod.MiniMaxH3PromptDirector().direct(
+        prompt="follow subject", task_type="T2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+        module_manifest=manifest,
+    )
+    assert "natural_camera_follow" in report
+    assert json.loads(prompt_ir)["applied_modules"] == ["natural_camera_follow"]
+
+
+def test_direct_module_manifest_v12_reports_render_profile_and_fingerprints(monkeypatch):
+    from unittest.mock import MagicMock
+    import json
+
+    mod = _load_mod()
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value=(
+        '{"integrated_multimodal_description":"[Shot 1] A subject moves.",'
+        '"overall_soundscape":"N/A","non_diegetic_music":"N/A"}'
+    )))
+    manifest = json.dumps({
+        "schema_version": "h3_prompt_modules/1.2",
+        "scope": "全部",
+        "render_profile": "compact",
+        "module_set_sha256": "a" * 64,
+        "rendered_system_sha256": "b" * 64,
+        "resolved": [{"id": "anime_identity"}],
+        "issues": [],
+    })
+    _, report, _, prompt_ir = mod.MiniMaxH3PromptDirector().direct(
+        prompt="keep identity", task_type="I2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+        module_manifest=manifest,
+    )
+    assert "[模块渲染] 档位=compact" in report
+    assert "a" * 64 in report and "b" * 64 in report
+    assert json.loads(prompt_ir)["applied_modules"] == ["anime_identity"]
 
 
 def test_direct_chinese_mode_reports_experimental_warning(monkeypatch):
@@ -1046,6 +1325,28 @@ def test_deepseek_payload_too_large_is_not_retried(monkeypatch):
     assert len(calls) == 1
 
 
+def test_transport_failure_maps_local_model_not_loaded_without_echoing_body(monkeypatch):
+    mod = _load_mod()
+    import io
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        body = b'{"error":{"message":"No models loaded. private prompt fragment"}}'
+        raise mod.urllib.error.HTTPError(request.full_url, 400, "bad", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    try:
+        mod._post_json_bytes(
+            "http://127.0.0.1:1234/v1/chat/completions", b"{}",
+            {"Content-Type": "application/json"}, 30, max_retries=0,
+        )
+        assert False, "未加载模型必须抛安全传输错误"
+    except mod._TransportFailure as exc:
+        assert exc.transport_meta["attempts"][0]["provider_error"] == "local_model_not_loaded"
+        assert "原生/JIT 自动加载未成功" in str(exc)
+        assert "private prompt fragment" not in str(exc)
+
+
 def test_gemini_native_wire_preserves_system_images_schema_and_diagnostics(monkeypatch):
     mod = _load_mod()
     captured = {}
@@ -1132,6 +1433,89 @@ def test_gemini_native_wire_preserves_system_images_schema_and_diagnostics(monke
     assert raw.transport_meta["request_sha256"] == mod._sha256_bytes(captured["body"])
 
 
+def test_gemini_native_video_part_is_prepared_and_remote_file_deleted(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class FakeCloudVideo:
+        @staticmethod
+        def prepare_gemini_video(source, api_key, route, fps, timeout_s,
+                                 inline_overhead_bytes=0):
+            captured["prepare"] = (
+                source, api_key, route, fps, timeout_s, inline_overhead_bytes,
+            )
+            return (
+                {"fileData": {"mimeType": "video/mp4", "fileUri": "files.example.invalid/opaque"},
+                 "videoMetadata": {"fps": 2.0}},
+                {"route": "file_api", "size_bytes": 1234, "remote_cleanup": "pending"},
+                "files/opaque-name",
+            )
+
+        @staticmethod
+        def delete_gemini_file(name, api_key, timeout_s):
+            captured["delete"] = (name, api_key, timeout_s)
+            return True
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self):
+            return json.dumps({
+                "candidates": [{"content": {"parts": [{"text": "{\"ok\":true}"}]},
+                                "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 42, "candidatesTokenCount": 3},
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["request_timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(mod, "_load_cloud_video", lambda: FakeCloudVideo)
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    source = {"type": "MINIMAX_H3_CLOUD_VIDEO", "opaque": True}
+    raw = mod._call_chat(
+        "https://generativelanguage.googleapis.com/v1beta", "gemini-secret",
+        "gemini-3.1-flash-lite",
+        [{"role": "system", "content": "JSON"}, {"role": "user", "content": [
+            {"type": "text", "text": "Analyze <Video 1>."},
+            {"type": "gemini_video_file", "source": source, "route": "file_api", "fps": 2},
+        ]}],
+        0.2, 1024, 30, json_mode="force",
+        response_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+    )
+    part = captured["payload"]["contents"][0]["parts"][1]
+    assert part["fileData"]["mimeType"] == "video/mp4"
+    assert part["videoMetadata"] == {"fps": 2.0}
+    assert captured["prepare"] == (source, "gemini-secret", "file_api", 2.0, 30, 0)
+    assert captured["delete"] == ("files/opaque-name", "gemini-secret", 30)
+    assert raw.media_meta["remote_cleanup"] == "deleted"
+    assert raw.media_meta["route"] == "file_api"
+
+
+def test_timeline_manifest_projection_preserves_source_indices_and_segments():
+    mod = _load_mod()
+    manifest = {
+        "sequence_label": "<Video 1>", "total_frames": 240, "fps": 24,
+        "duration_seconds": 10.0,
+        "frames": [
+            {"frame": 0, "time_sec": 0, "timecode": "00:00.000", "position": 0},
+            {"frame": 120, "time_sec": 5, "timecode": "00:05.000", "position": 0.5},
+            {"frame": 239, "time_sec": 9.958, "timecode": "00:09.958", "position": 1},
+        ],
+        "segments": [{"segment": 1, "start_sec": 0, "end_sec": 5}],
+        "untrusted_extra": "ignore me",
+    }
+    projected = mod._parse_timeline_manifest(json.dumps(manifest), input_frame_count=3)
+    assert [item["frame"] for item in projected["frames"]] == [0, 120, 239]
+    assert projected["segments"][0]["segment"] == 1
+    assert projected["segments"][0]["start_sec"] == 0.0
+    assert projected["segments"][0]["end_sec"] == 5.0
+    assert "untrusted_extra" not in projected
+
+
 def test_gemini_native_wire_rejects_invalid_dialogue_shape_before_network(monkeypatch):
     mod = _load_mod()
     monkeypatch.setattr(
@@ -1174,17 +1558,51 @@ def test_transport_error_classification_matrix():
 
 def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     mod = _load_mod()
+    # 不读取开发机真实 user/default 凭据文件；此测试只验证节点的解析/阻断逻辑。
+    class IsolatedCredentials:
+        _env = {
+            "deepseek": "DEEPSEEK_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+        }
+
+        @classmethod
+        def resolve_credential(cls, provider, credential_id):
+            del credential_id
+            env_name = cls._env.get(provider, "")
+            value = os.environ.get(env_name, "") if env_name else ""
+            return (value, f"environment:{env_name}") if value else ("", "unconfigured")
+
+    monkeypatch.setattr(mod, "_load_cloud_credentials", lambda: IsolatedCredentials)
     assert "MiniMaxH3CloudDirector" in mod.NODE_CLASS_MAPPINGS
     inputs = mod.MiniMaxH3CloudDirector.INPUT_TYPES()
     required = inputs["required"]
     assert "api_key" not in required
     assert "api_base_url" not in required
     assert "lmstudio_after_use" not in required
-    assert required["cloud_provider"][0] == ["deepseek", "gemini"]
+    assert required["cloud_provider"][0] == [
+        "deepseek", "gemini", "doubao", "claude", "glm", "custom",
+    ]
+    assert "cloud_base_url" in required
+    assert required["cloud_base_url"][1]["default"] == ""
     assert required["api_model"][1]["default"] == ""
     assert required["frame_sequence_limit"][1]["default"] == 48
     assert required["max_tokens"][1]["default"] == 16384
     assert required["duration_seconds"][1].get("forceInput") is not True
+    required_names = list(required)
+    assert required_names[:16] == [
+        "prompt", "task_type", "duration_seconds", "shot_count", "rewrite_mode",
+        "output_language", "cloud_provider", "api_model", "temperature", "max_tokens",
+        "timeout_s", "api_reasoning", "analysis_mode", "frame_sequence_limit",
+        "frame_selection_mode", "frame_selection_spec",
+    ]
+    assert required_names[-4:] == [
+        "cloud_base_url", "my_preset", "gemini_video_route", "gemini_video_fps",
+    ]
+    assert required["frame_sequence_limit"][1]["max"] == 600
+    assert required["gemini_video_route"][0] == ["auto", "inline", "file_api"]
+    assert inputs["optional"]["cloud_video"][0] == "MINIMAX_H3_CLOUD_VIDEO"
+    assert inputs["optional"]["comfy_video"][0] == "VIDEO"
+    assert inputs["optional"]["video_timeline_manifest"][0] == "STRING"
     assert mod.MiniMaxH3PromptDirector.INPUT_TYPES()["required"]["duration_seconds"][1].get(
         "forceInput"
     ) is not True
@@ -1227,6 +1645,8 @@ def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     assert captured["model_profile"] == "deepseek_vision"
     assert captured["api_failure_policy"] == "stop"
     assert captured["analysis_mode"] == "single"
+    assert captured["_gemini_video_route"] == "auto"
+    assert captured["_gemini_video_fps"] == 0.0
 
     captured.clear()
     result = mod.MiniMaxH3CloudDirector().direct_cloud(**{**common, "api_model": ""})
@@ -1249,6 +1669,42 @@ def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     assert captured["model_profile"] == "gemini_vision"
 
     captured.clear()
+    native_source = {"type": "MINIMAX_H3_CLOUD_VIDEO"}
+    result = mod.MiniMaxH3CloudDirector().direct_cloud(**{
+        **gemini_common, "gemini_video_route": "file_api", "gemini_video_fps": 2.0,
+        "cloud_video": native_source,
+    })
+    assert result[0] == "prompt"
+    assert captured["_cloud_video"] is native_source
+    assert captured["_gemini_video_route"] == "file_api"
+    assert captured["_gemini_video_fps"] == 2.0
+
+    class FakeCloudVideoAdapter:
+        @staticmethod
+        def cloud_video_source_from_comfy_video(video):
+            assert video == "core-video-object"
+            return {"type": "MINIMAX_H3_CLOUD_VIDEO", "adapted": True}
+
+    monkeypatch.setattr(mod, "_load_cloud_video", lambda: FakeCloudVideoAdapter)
+    captured.clear()
+    result = mod.MiniMaxH3CloudDirector().direct_cloud(**{
+        **gemini_common, "comfy_video": "core-video-object",
+    })
+    assert result[0] == "prompt"
+    assert captured["_cloud_video"] == {
+        "type": "MINIMAX_H3_CLOUD_VIDEO", "adapted": True,
+    }
+    try:
+        mod.MiniMaxH3CloudDirector().direct_cloud(**{
+            **gemini_common,
+            "cloud_video": native_source,
+            "comfy_video": "core-video-object",
+        })
+        assert False, "两种原生视频输入同时连接时必须在发送前阻断"
+    except RuntimeError as exc:
+        assert "不能同时连接" in str(exc)
+
+    captured.clear()
     result = mod.MiniMaxH3CloudDirector().direct_cloud(**{
         **gemini_common,
         "api_model": "deepseek-v4-flash-vision-exp",
@@ -1256,3 +1712,279 @@ def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     assert result[0] == "prompt"
     assert captured["api_model"] == "gemini-3.1-flash-lite"
     assert "忽略来自另一连接预设的旧模型覆盖" in captured["_cloud_connection_note"]
+
+
+def test_cloud_preset_binds_into_registry_profile(monkeypatch):
+    """阶段 A-1：每个云端连接预设都必须绑定已注册能力 profile，且 default_model 一致。
+
+    连接层不得声称一个能力层没有声明的模型；若 default_model 与 registry profile.model
+    不一致，_build_cloud_presets 会在加载期抛错（此处直接验证绑定摘要与一致性）。
+    """
+    mod = _load_mod()
+    registry = mod._load_provider_registry()
+    for preset_id, item in mod._CLOUD_DIRECTOR_PRESETS.items():
+        profile = registry.profile_for_preset(preset_id)
+        assert item["capability_profile_id"] == profile.profile_id
+        # custom 例外：model 由用户填，default_model 为空；其余必须与能力层一致。
+        if not item["is_custom"]:
+            assert item["default_model"] == profile.model
+        assert item["provider"]
+        assert item["json_mode"] in ("force", "auto_retry")
+        assert item["api_failure_policy"] in ("stop", "passthrough")
+        # 连接层保留提示词纪律口径 model_profile（与能力 wire 不同维度）。
+        assert item["model_profile"]
+    # preset 顺序稳定（下拉用）。
+    assert list(mod._CLOUD_DIRECTOR_PRESETS) == [
+        "deepseek", "gemini", "doubao", "claude", "glm", "minimax", "custom", "my_presets",
+    ]
+    assert mod._CLOUD_DIRECTOR_VISIBLE_PRESETS == [
+        "deepseek", "gemini", "doubao", "claude", "glm", "custom",
+    ]
+    # 未注册 preset 由 profile_for_preset 拦截。
+    try:
+        registry.profile_for_preset("not_a_preset")
+        raise AssertionError("未注册 preset 应抛 KeyError")
+    except KeyError:
+        pass
+
+
+def test_cloud_custom_preset_uses_user_base_url_and_model(monkeypatch):
+    """阶段 A-1：custom 预设完整走用户提供的 base_url + api_model + OPENAI_API_KEY。"""
+    mod = _load_mod()
+    captured = {}
+
+    def fake_direct(self, **kwargs):
+        del self
+        captured.update(kwargs)
+        return ("prompt", "report", "[]", "{}")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "custom-key")
+    monkeypatch.setattr(mod.MiniMaxH3PromptDirector, "direct", fake_direct)
+    common = dict(
+        prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        cloud_provider="custom", api_model="my-vision-model",
+        temperature=0.2, max_tokens=4096, timeout_s=30,
+        api_reasoning="auto", analysis_mode="single", frame_sequence_limit=48,
+        frame_selection_mode="uniform_full", frame_selection_spec="",
+        cloud_base_url="https://api.example.com/v1",
+    )
+    result = mod.MiniMaxH3CloudDirector().direct_cloud(**common)
+    assert result[0] == "prompt"
+    assert captured["api_base_url"] == "https://api.example.com/v1"
+    assert captured["api_model"] == "my-vision-model"
+    assert captured["_resolved_api_key"] == "custom-key"
+    assert captured["_resolved_api_key_source"] == "environment:OPENAI_API_KEY"
+    assert captured["json_mode"] == "auto_retry"
+    assert captured["model_profile"] == "openai_compat_vision"
+
+
+def test_cloud_custom_preset_requires_base_url_and_model(monkeypatch):
+    mod = _load_mod()
+    monkeypatch.setenv("OPENAI_API_KEY", "custom-key")
+    import pytest as _pytest
+    # 缺 base_url → 报错
+    with _pytest.raises(ValueError):
+        mod.MiniMaxH3CloudDirector().direct_cloud(
+            prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+            rewrite_mode="balanced", output_language="English",
+            cloud_provider="custom", api_model="m", temperature=0.2, max_tokens=4096,
+            timeout_s=30, api_reasoning="auto", analysis_mode="single",
+            frame_sequence_limit=48, frame_selection_mode="uniform_full",
+            frame_selection_spec="", cloud_base_url="",
+        )
+    # 缺 model → 报错
+    with _pytest.raises(ValueError):
+        mod.MiniMaxH3CloudDirector().direct_cloud(
+            prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+            rewrite_mode="balanced", output_language="English",
+            cloud_provider="custom", api_model="", temperature=0.2, max_tokens=4096,
+            timeout_s=30, api_reasoning="auto", analysis_mode="single",
+            frame_sequence_limit=48, frame_selection_mode="uniform_full",
+            frame_selection_spec="", cloud_base_url="https://api.example.com/v1",
+        )
+
+
+def test_cloud_custom_loopback_can_run_without_key(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class EmptyCredentials:
+        @staticmethod
+        def resolve_credential(provider, credential_id):
+            del provider, credential_id
+            return "", "unconfigured"
+
+    def fake_direct(self, **kwargs):
+        del self
+        captured.update(kwargs)
+        return ("prompt", "report", "[]", "{}")
+
+    monkeypatch.setattr(mod, "_load_cloud_credentials", lambda: EmptyCredentials)
+    monkeypatch.setattr(mod.MiniMaxH3PromptDirector, "direct", fake_direct)
+    mod.MiniMaxH3CloudDirector().direct_cloud(
+        prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        cloud_provider="custom", api_model="qwen3.8", temperature=0.2,
+        max_tokens=4096, timeout_s=30, api_reasoning="auto", analysis_mode="single",
+        frame_sequence_limit=48, frame_selection_mode="uniform_full",
+        frame_selection_spec="", cloud_base_url="http://127.0.0.1:1234/v1",
+    )
+    assert captured["_resolved_api_key"] == ""
+    assert captured["_resolved_api_key_source"] == "本机 loopback 无鉴权兼容模式"
+    assert "原生/JIT 自动加载接口" in captured["_cloud_connection_note"]
+
+
+def test_cloud_saved_preset_uses_its_own_credential_slot(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class FakeCredentials:
+        resolved_ids = []
+
+        @staticmethod
+        def get_custom_preset(name):
+            assert name == "我的代理"
+            return {
+                "name": name,
+                "base_url": "https://proxy.example/v1",
+                "model": "vision-agent",
+                "credential_id": "custom_deadbeef",
+            }
+
+        @classmethod
+        def resolve_credential(cls, provider, credential_id):
+            assert provider == "custom"
+            cls.resolved_ids.append(credential_id)
+            return "preset-secret", f"local_file:{credential_id}"
+
+    def fake_direct(self, **kwargs):
+        del self
+        captured.update(kwargs)
+        return ("prompt", "report", "[]", "{}")
+
+    monkeypatch.setattr(mod, "_load_cloud_credentials", lambda: FakeCredentials)
+    monkeypatch.setattr(mod.MiniMaxH3PromptDirector, "direct", fake_direct)
+    result = mod.MiniMaxH3CloudDirector().direct_cloud(
+        prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        cloud_provider="custom", api_model="stale-model", temperature=0.2,
+        max_tokens=4096, timeout_s=30, api_reasoning="auto", analysis_mode="single",
+        frame_sequence_limit=48, frame_selection_mode="uniform_full",
+        frame_selection_spec="", my_preset="我的代理",
+    )
+    assert result[0] == "prompt"
+    assert FakeCredentials.resolved_ids == ["custom_deadbeef"]
+    assert captured["api_base_url"] == "https://proxy.example/v1"
+    assert captured["api_model"] == "vision-agent"
+    assert captured["_resolved_api_key"] == "preset-secret"
+    assert captured["_resolved_api_key_source"] == "local_file:custom_deadbeef"
+
+
+def test_cloud_legacy_my_presets_still_loads_saved_connection(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class FakeCredentials:
+        @staticmethod
+        def get_custom_preset(name):
+            return {
+                "name": name, "base_url": "https://legacy.example/v1",
+                "model": "legacy-vision", "credential_id": "custom_legacy",
+            }
+
+        @staticmethod
+        def resolve_credential(provider, credential_id):
+            assert (provider, credential_id) == ("custom", "custom_legacy")
+            return "legacy-secret", "local_file:custom_legacy"
+
+    def fake_direct(self, **kwargs):
+        del self
+        captured.update(kwargs)
+        return ("prompt", "report", "[]", "{}")
+
+    monkeypatch.setattr(mod, "_load_cloud_credentials", lambda: FakeCredentials)
+    monkeypatch.setattr(mod.MiniMaxH3PromptDirector, "direct", fake_direct)
+    mod.MiniMaxH3CloudDirector().direct_cloud(
+        prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        cloud_provider="my_presets", api_model="", temperature=0.2,
+        max_tokens=4096, timeout_s=30, api_reasoning="auto", analysis_mode="single",
+        frame_sequence_limit=48, frame_selection_mode="uniform_full",
+        frame_selection_spec="", my_preset="旧连接",
+    )
+    assert captured["api_base_url"] == "https://legacy.example/v1"
+    assert captured["api_model"] == "legacy-vision"
+
+
+def test_cloud_prompt_ir_budget_is_capped_per_connection(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class FakeCredentials:
+        @staticmethod
+        def resolve_credential(provider, credential_id):
+            del provider, credential_id
+            return "secret", "isolated"
+
+    def fake_direct(self, **kwargs):
+        del self
+        captured.update(kwargs)
+        return ("prompt", "report", "[]", "{}")
+
+    monkeypatch.setattr(mod, "_load_cloud_credentials", lambda: FakeCredentials)
+    monkeypatch.setattr(mod.MiniMaxH3PromptDirector, "direct", fake_direct)
+    mod.MiniMaxH3CloudDirector().direct_cloud(
+        prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="English",
+        cloud_provider="deepseek", api_model="", temperature=0.2,
+        max_tokens=131072, timeout_s=30, api_reasoning="auto", analysis_mode="single",
+        frame_sequence_limit=48, frame_selection_mode="uniform_full",
+        frame_selection_spec="",
+    )
+    assert captured["max_tokens"] == 16384
+    assert "131072 已收敛到 16384" in captured["_cloud_connection_note"]
+
+
+def test_cloud_legacy_minimax_preset_fails_closed_before_credentials():
+    mod = _load_mod()
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError, match="尚未证明支持"):
+        mod.MiniMaxH3CloudDirector().direct_cloud(
+            prompt="p", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+            rewrite_mode="balanced", output_language="English",
+            cloud_provider="minimax", api_model="MiniMax-M3", temperature=0.2,
+            max_tokens=4096, timeout_s=30, api_reasoning="auto", analysis_mode="single",
+            frame_sequence_limit=48, frame_selection_mode="uniform_full",
+            frame_selection_spec="",
+        )
+
+
+def test_claude_messages_uses_native_headers_and_thinking(monkeypatch):
+    """阶段 A-1：Claude 走原生 Messages（x-api-key + anthropic-version + adaptive thinking）。"""
+    mod = _load_mod()
+    captured = {}
+
+    def fake_post(url, body_bytes, headers, timeout_s, max_retries=0):
+        captured["url"] = url
+        captured["headers"] = dict(headers)
+        captured["body"] = json.loads(body_bytes.decode("utf-8"))
+        return (json.dumps({
+            "content": [{"type": "text", "text": '{"ok": true}'}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 12, "output_tokens": 6},
+        }).encode("utf-8"), {"request_sha256": "x"})
+
+    mod._post_json_bytes = fake_post
+    raw = mod._call_chat(
+        "https://api.anthropic.com/v1", "ck", "claude-sonnet-4-6",
+        [{"role": "user", "content": "hi"}],
+        0.2, 4096, 30, json_mode="force", api_reasoning="auto", request_purpose="final",
+    )
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    assert captured["headers"]["x-api-key"] == "ck"
+    assert captured["headers"]["anthropic-version"] == "2023-06-01"
+    assert captured["body"]["thinking"]["type"] == "adaptive"
+    assert captured["body"]["output_config"]["effort"] == "low"
+    assert raw.backend == "claude_messages"
+    assert "ok" in str(raw)

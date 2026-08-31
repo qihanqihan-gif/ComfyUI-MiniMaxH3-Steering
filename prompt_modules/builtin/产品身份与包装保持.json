@@ -1,0 +1,48 @@
+{
+  "id": "product_identity_fidelity",
+  "title_zh": "产品身份与包装保持",
+  "version": 3,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "identity",
+  "source": "MiniMax-H3 official reference-role guidance + project product fidelity heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["connected_product_reference", "product_geometry", "material_fidelity", "verbatim_packaging"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "从已连接产品参考中锁定产品几何、材质、配色、标志与包装文字，不补造商业事实。",
+    "adds": [
+      {"path": "identity.product.reference_fidelity", "value": "preserve_geometry_material_branding_and_packaging"}
+    ],
+    "preserves": [
+      "product.silhouette_and_proportions",
+      "product.parts_and_fixed_structure",
+      "product.material_color_and_finish",
+      "product.logo_and_packaging_text",
+      "visible_text.verbatim",
+      "user.requested_product_action"
+    ],
+    "forbids": [
+      "identity_rule_without_connected_product_reference",
+      "invented_parameter_claim_certification_or_packaging_copy",
+      "product_part_addition_removal_or_shape_drift",
+      "reference_views_treated_as_sequential_storyboard",
+      "impossible_simultaneous_detail_visibility"
+    ],
+    "defaults": [
+      {"path": "identity.product.detail_budget", "value": "prioritize_currently_visible_high_signal_features"}
+    ]
+  },
+  "ownership": {
+    "reads": ["media.connected_product_references", "product.user_facts", "user.requested_product_action"],
+    "writes": ["identity.product.reference_fidelity"],
+    "augments": ["continuity.product_geometry", "continuity.branding", "visible_text.verbatim"]
+  },
+  "resolution": {
+    "exclusive_group": "identity.product.reference_fidelity",
+    "priority": 55,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "产品身份与包装保持规则：仅在确实连接产品参考素材时使用，把产品作为独立、可检查的视觉身份。\n1. 优先保持轮廓、长宽厚比例、部件位置、固定结构、主配色、材质与表面处理，再保持 logo、标签和包装文字；多视图共同描述同一产品，不能被误读为连续分镜。\n2. 旋转、开合、拆装或使用演示时，写清哪个部件移动、轴线或接触点在哪里、哪些结构始终固定，防止产品软化、增减零件或比例漂移。\n3. 用户提供的品牌名、包装文字和声明逐字保留；未提供的规格、价格、认证、功效、卖点和包装小字不得补造。\n4. 对高反光、透明、细线或微小结构，只挑当前景别真正可见的关键特征，不同时要求读清相互遮挡的全部细节。"
+}

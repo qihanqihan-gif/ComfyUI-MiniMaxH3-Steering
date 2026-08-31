@@ -278,7 +278,13 @@ def test_frontend_key_widget_is_non_serialized_and_does_not_use_browser_storage(
     assert "installCloudCredentialButton" in source
     assert 'serializeValue = () => undefined' in source
     assert 'title: "MiniMax H3 云端多模态导演"' in source
-    assert "参考图与视频帧上传说明" in source
+    assert "参考图 / 视频如何发送" in source
+    assert "installDirectorMediaReferenceButton" in source
+    assert "📎 插入 / 检查素材引用" in source
+    assert "按实际连线密集编号" in source
+    assert "插入全部未引用素材" in source
+    assert "DeepSeek 600 帧" in source
+    assert "Gemini 原生视频" in source
     assert "管理云端连接" in source
     assert "联合上传（参考图 + 所选视频帧同次发送）" in source
     assert 'gemini: {' in source
@@ -286,7 +292,243 @@ def test_frontend_key_widget_is_non_serialized_and_does_not_use_browser_storage(
     assert "小图 + 严格 JSON 真实视觉探针" in source
     assert "刷新 / 选择云端模型" in source
     assert "/minimaxh3lab/cloud/models" in source
+    assert "/minimaxh3lab/cloud/presets" in source
+    assert "createCloudPresetManager" in source
+    assert "normalizeCloudDirectorWidgetValues" in source
+    assert 'byName.cloud_provider === "my_presets"' in source
+    assert "使用已保存连接" in source
+    assert "仅临时用于当前节点" in source
+    assert 'preset_name: config.presetName || ""' in source
+    assert 'payload.vision_probe === "strict_json_passed"' in source
+    assert 'base_url: config.baseUrl || ""' in source
     assert "恢复连接预设默认" in source
     cloud_section = source[source.index("const CLOUD_CREDENTIAL_PROVIDERS"):]
     assert "localStorage" not in cloud_section
     assert "sessionStorage" not in cloud_section
+
+
+# ============================================================================
+# 2026-08-28：新增常用云端 LLM provider（豆包/Claude/GLM/MiniMax/custom）
+# ============================================================================
+
+def test_new_providers_registered_with_credentials():
+    mod = _load_mod()
+    for p, env, cred, base in (
+        ("volcengine", "ARK_API_KEY", "volcengine_default", "https://ark.cn-beijing.volces.com/api/v3"),
+        ("anthropic", "ANTHROPIC_API_KEY", "anthropic_default", "https://api.anthropic.com/v1"),
+        ("zhipu", "ZHIPU_API_KEY", "zhipu_default", "https://open.bigmodel.cn/api/paas/v4"),
+        ("minimax", "MINIMAX_API_KEY", "minimax_default", "https://api.minimaxi.com/v1"),
+        ("custom", "OPENAI_API_KEY", "custom_default", ""),
+    ):
+        d = mod.provider_definition(p)
+        assert d["environment_variable"] == env
+        assert d["default_credential_id"] == cred
+        assert d["base_url"] == base
+
+
+def test_static_model_list_for_no_discovery_providers():
+    mod = _load_mod()
+    # 无标准 GET /models 的 provider 返回静态候选（不联网）。
+    vol = mod.list_cloud_models("volcengine", "")
+    assert any(m["id"] == "doubao-seed-evolving" for m in vol)
+    assert any(m["id"] == "MiniMax-M2.7" for m in mod.list_cloud_models("minimax", ""))
+    # custom 会按用户 Base URL 尝试标准 GET /models；未填地址时明确阻断。
+    with pytest.raises(mod.CloudCredentialError, match="Base URL"):
+        mod.list_cloud_models("custom", "")
+
+
+def test_custom_openai_model_discovery_uses_base_url_and_optional_auth(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "data": [
+                    {"id": "qwen3.8-27b", "display_name": "Qwen 3.8 27B"},
+                    {"id": "vision-b"},
+                ],
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = {k.casefold(): v for k, v in request.headers.items()}
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    rows = mod.list_cloud_models(
+        "custom", "unit-secret", 30, base_url="http://127.0.0.1:1234/v1",
+    )
+    assert captured["url"] == "http://127.0.0.1:1234/v1/models"
+    assert captured["headers"]["authorization"] == "Bearer unit-secret"
+    assert [row["id"] for row in rows] == ["qwen3.8-27b", "vision-b"]
+    assert "unit-secret" not in json.dumps(rows)
+
+
+def test_new_provider_probe_functions_exist():
+    mod = _load_mod()
+    for name in (
+        "test_zhipu_connection", "test_volcengine_connection",
+        "test_anthropic_connection", "test_minimax_connection", "test_custom_connection",
+    ):
+        assert callable(getattr(mod, name, None)), name
+    # 无 key 的探针必须明确抛错，不冒充通过。
+    for name, args in (
+        ("test_zhipu_connection", ()),
+        ("test_volcengine_connection", ()),
+        ("test_minimax_connection", ()),
+        ("test_anthropic_connection", ()),
+    ):
+        with pytest.raises(mod.CloudCredentialError):
+            getattr(mod, name)("", *args)
+
+
+def test_custom_probe_requires_base_url_and_model():
+    mod = _load_mod()
+    # base_url / model 缺失都抛 CloudCredentialError（需用户填，不联网）。
+    with pytest.raises(mod.CloudCredentialError):
+        mod.test_custom_connection("k", base_url="", model_id="")
+    with pytest.raises(mod.CloudCredentialError):
+        mod.test_custom_connection("k", base_url="https://x.com/v1", model_id="")
+
+
+def test_custom_loopback_probe_can_run_without_api_key(monkeypatch):
+    mod = _load_mod()
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"{\\"image_received\\":true,\\"left_half\\":\\"red\\",\\"right_half\\":\\"blue\\"}"}}],"usage":{}}'
+
+    def fake_urlopen(request, timeout):
+        captured["headers"] = {k.casefold(): v for k, v in request.headers.items()}
+        captured["url"] = request.full_url
+        return Response()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    result = mod.test_custom_connection(
+        "", base_url="http://127.0.0.1:1234/v1", model_id="local-vision",
+    )
+    assert result["vision_probe"] == "strict_json_passed"
+    assert captured["url"].endswith("/v1/chat/completions")
+    assert "authorization" not in captured["headers"]
+
+
+# ============================================================================
+# 「我的预设」持久化（2026-08-28）：save/list/get/delete，不含 key
+# ============================================================================
+
+def test_custom_preset_save_list_get_delete(tmp_path):
+    mod = _load_mod()
+    mod.save_custom_preset("我的GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-5.3-flash", user_dir=tmp_path)
+    presets = mod.list_custom_presets(user_dir=tmp_path)
+    assert any(p["name"] == "我的GLM" and p["model"] == "glm-5.3-flash" for p in presets)
+    g = mod.get_custom_preset("我的GLM", user_dir=tmp_path)
+    assert g["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
+    assert g["model"] == "glm-5.3-flash"
+    assert g["credential_id"].startswith("custom_")
+    mod.delete_custom_preset("我的GLM", user_dir=tmp_path)
+    assert mod.list_custom_presets(user_dir=tmp_path) == []
+
+
+def test_custom_preset_rejects_invalid_payload(tmp_path):
+    mod = _load_mod()
+    with pytest.raises(mod.CloudCredentialError):
+        mod.save_custom_preset("", "https://x.com/v1", "m", user_dir=tmp_path)  # 空名
+    with pytest.raises(mod.CloudCredentialError):
+        mod.save_custom_preset("名", "", "m", user_dir=tmp_path)  # 空 base_url
+    with pytest.raises(mod.CloudCredentialError):
+        mod.save_custom_preset("名", "ftp://x", "m", user_dir=tmp_path)  # 非 http
+    with pytest.raises(mod.CloudCredentialError):
+        mod.save_custom_preset("名", "https://x.com/v1", "", user_dir=tmp_path)  # 空 model
+
+
+def test_custom_preset_does_not_store_key(tmp_path):
+    mod = _load_mod()
+    mod.save_custom_preset("GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-5.3-flash", user_dir=tmp_path)
+    # 任何 list/get 都不含 key 字段
+    for p in mod.list_custom_presets(user_dir=tmp_path):
+        assert "key" not in p and "api_key" not in p
+        assert set(p.keys()) <= {"id", "name", "base_url", "model", "credential_id"}
+
+
+def test_custom_presets_get_stable_separate_credential_slots(tmp_path):
+    mod = _load_mod()
+    first = mod.save_custom_preset("代理一", "https://one.example/v1", "vision-a", user_dir=tmp_path)
+    second = mod.save_custom_preset("代理二", "https://two.example/v1", "vision-b", user_dir=tmp_path)
+    assert first["credential_id"] != second["credential_id"]
+    updated = mod.save_custom_preset("代理一", "https://new.example/v1", "vision-c", user_dir=tmp_path)
+    assert updated["credential_id"] == first["credential_id"]
+    stored = json.loads(mod._presets_file_path(tmp_path).read_text(encoding="utf-8"))
+    assert "api_key" not in json.dumps(stored)
+
+
+def test_anthropic_probe_requires_real_visual_json(monkeypatch):
+    mod = _load_mod()
+    secret = "anthropic-probe-secret"
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "content": [{
+                    "type": "text",
+                    "text": '{"image_received":true,"left_half":"red","right_half":"blue"}',
+                }],
+                "usage": {"input_tokens": 19, "output_tokens": 8},
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["headers"] = {key.casefold(): value for key, value in request.headers.items()}
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    result = mod.test_anthropic_connection(secret, "claude-sonnet-4-6", 30)
+    assert result["vision_probe"] == "strict_json_passed"
+    assert captured["headers"]["x-api-key"] == secret
+    assert captured["payload"]["messages"][0]["content"][1]["type"] == "image"
+    assert secret not in json.dumps(result)
+
+
+def test_anthropic_probe_rejects_incorrect_visual_answer(monkeypatch):
+    mod = _load_mod()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "content": [{
+                    "type": "text",
+                    "text": '{"image_received":true,"left_half":"blue","right_half":"red"}',
+                }],
+            }).encode("utf-8")
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", lambda request, timeout: Response())
+    with pytest.raises(mod.CloudCredentialError, match="没有通过"):
+        mod.test_anthropic_connection("key", "claude-sonnet-4-6", 30)

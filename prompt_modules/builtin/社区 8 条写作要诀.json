@@ -1,0 +1,34 @@
+{
+  "id": "community_8_tips",
+  "title_zh": "社区 8 条写作要诀",
+  "version": 3,
+  "scope": "全部",
+  "category": "reference",
+  "source": "Community authoring checklist cross-checked against MiniMax-H3 official prompt guide",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["author_checklist", "migration_reference", "non_runtime"],
+  "selectable": false,
+  "status": "reference_only",
+  "reference_doc": "docs/创作规则作者检查清单.md",
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "保留旧社区清单的来源与迁移说明，仅供模块作者审阅，不参与运行时提示词组合。",
+    "adds": [],
+    "preserves": [],
+    "forbids": ["runtime_prompt_injection", "second_protocol_layer"],
+    "defaults": []
+  },
+  "ownership": {
+    "reads": [],
+    "writes": [],
+    "augments": []
+  },
+  "resolution": {
+    "exclusive_group": "",
+    "priority": 0,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "作者参考资料，不注入 Prompt Director。原八条内容已经分别由核心协议、编译器、素材注册、主运镜规则、声音规则、风险约束和作者检查清单承担；继续把它作为一个可选规则会形成第二份总协议。完整迁移后的检查项见 docs/创作规则作者检查清单.md。"
+}

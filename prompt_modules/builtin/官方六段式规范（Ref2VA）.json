@@ -1,0 +1,13 @@
+{
+  "id": "official_six_part",
+  "title_zh": "官方六段式规范（Ref2VA）",
+  "version": 2,
+  "scope": "Ref2VA",
+  "deprecated": true,
+  "source": "Superseded by the built-in protocol_ref rule",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing-ref",
+  "evidence_level": "official_protocol",
+  "features": ["legacy_alias"],
+  "conflicts": [],
+  "instructions": "【旧版兼容文件，不再列为可选模块】Ref2VA 六段式协议现由内置 protocol_ref 规则自动加载。不要把本文件与自动协议重复注入。"
+}

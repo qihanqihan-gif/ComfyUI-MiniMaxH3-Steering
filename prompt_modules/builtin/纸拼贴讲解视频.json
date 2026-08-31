@@ -1,0 +1,51 @@
+{
+  "id": "scene_paper_collage",
+  "title_zh": "纸拼贴讲解视频",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: paper-collage-explainer-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/paper-collage-explainer-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["editorial_paper_collage", "visual_metaphor", "tactile_assembly", "collage_sfx"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "用扁平分层的编辑式纸拼贴隐喻表达一个概念，并以可读的纸片组装完成当前节拍。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "editorial_paper_collage_explainer"},
+      {"path": "visual.medium.primary", "value": "layered_halftone_paper_collage"},
+      {"path": "motion.assembly", "value": "paper_pieces_pop_slide_press_pause_and_lock"}
+    ],
+    "preserves": [
+      "user.core_meaning",
+      "user.factual_content",
+      "visible_text.verbatim",
+      "camera.motion.primary",
+      "timeline.layout.primary"
+    ],
+    "forbids": [
+      "smooth_digital_layer_drift",
+      "flat_vector_or_glossy_cg_medium",
+      "chaotic_object_flight_or_fast_spin",
+      "invented_explanatory_facts_or_text",
+      "unrequested_bgm_voiceover_or_subtitles"
+    ],
+    "defaults": [
+      {"path": "camera.motion.primary", "value": "locked_when_unspecified"},
+      {"path": "audio", "value": "tactile_collage_sfx_only"},
+      {"path": "visible_text", "value": "none_unless_supplied"}
+    ]
+  },
+  "ownership": {
+    "reads": ["user.core_meaning", "user.factual_content", "visible_text.user_copy", "camera.motion.primary"],
+    "writes": ["scene.recipe.primary", "visual.medium.primary"],
+    "augments": ["motion.assembly", "visual.paper_material", "audio.collage_sfx"]
+  },
+  "resolution": {
+    "exclusive_group": ["scene.recipe.primary", "visual.medium.primary"],
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "纸拼贴讲解配方：用一个具体的编辑式纸拼贴隐喻表达一个核心概念。\n1. 画面保持半调照片剪影、彩色卡纸、干净纤维纹理、轻微撕边、奶油色描边、层叠接缝和柔和实体阴影；纸张整洁克制，不默认做成发黄、脏旧的牛皮纸。\n2. 在当前短片内让背景、主体和辅助纸片按可读顺序进入，以滑入、弹入、轻微回弹、压平、停顿、锁定组成一个变化，结尾短暂保持完成构图；避免高速旋转、混乱飞散和光滑数字漂移。\n3. 若无独立主运镜，采用固定机位，让纸片动作承担节奏；纸张滑动、压平、摩擦和轻弹声与动作同步。\n4. 旁白、配乐、字幕和可见文字仅在用户要求并提供内容时加入，不虚构解释事实；避免转成普通矢量动画、实拍主持人或光滑 CG。"
+}

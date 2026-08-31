@@ -1,0 +1,46 @@
+{
+  "id": "subtle_still_motion",
+  "title_zh": "静态锚定·细微动态",
+  "version": 4,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "camera",
+  "source": "MiniMax-H3 official I2VA examples + community subtle-motion heuristic",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["composition_anchor", "micro_motion", "static_camera_default"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "在保持主体与构图稳定的前提下，只增加少量与画面证据一致的细微动态。",
+    "adds": [
+      {"path": "motion.micro", "value": "context_appropriate_micro_motion"}
+    ],
+    "preserves": [
+      "subject.identity",
+      "subject.pose_anchor",
+      "continuity.composition_anchor",
+      "continuity.perspective",
+      "scene.structure"
+    ],
+    "forbids": [
+      "unrequested_large_body_motion",
+      "scene_deformation",
+      "viewpoint_drift",
+      "rhythmically_unmotivated_micro_motion"
+    ],
+    "defaults": [
+      {"path": "camera.motion.primary", "value": "static", "when": "unspecified"}
+    ]
+  },
+  "ownership": {
+    "reads": ["subject.anchor", "camera.motion.primary"],
+    "writes": ["motion.micro"],
+    "augments": ["continuity.composition"]
+  },
+  "resolution": {
+    "exclusive_group": "",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "构图锚定与细微动态规则：本规则只补充小幅动作，不取得主运镜所有权。\n1. 根据当前画面证据选择最多 1–3 项合理微动，例如眨眼、呼吸、发丝或衣角轻摆、水面涟漪、云层缓移、尘埃或缓慢光影变化；不要机械地把整张清单全部加入。\n2. 为每项微动说明对象、幅度和节奏，保持 barely noticeable、slow drifting 或 gentle periodic motion 级别，并让运动来自可见环境或主体状态。\n3. 保持主体身份、主要姿势、取景、透视和场景结构稳定，禁止无关的大幅身体动作、场景变形、视角漂移或高频重复。\n4. 若没有其他主运镜规则，默认固定机位；若已经选择缓慢推进或自然跟随，则服从该主运镜，只在其构图内叠加细微动态。"
+}

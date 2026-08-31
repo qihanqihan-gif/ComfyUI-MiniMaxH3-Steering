@@ -1,12 +1,29 @@
 {
   "id": "slow_push_in",
   "title_zh": "缓慢推进（氛围感）",
-  "version": 2,
+  "version": 3,
   "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "camera",
   "source": "MiniMax-H3 official h3-prompt-writing camera vocabulary + community ambience recipe",
   "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
   "evidence_level": "official_aligned",
   "features": ["slow_push_in", "single_shot", "micro_motion"],
   "conflicts": ["subtle_still_motion"],
+  "semantic_contract": {
+    "camera_motion": "slow_push_in",
+    "amplitude": "subtle",
+    "speed": "gradual"
+  },
+  "ownership": {
+    "reads": ["subject.anchor"],
+    "writes": ["camera.motion.primary"],
+    "augments": ["motion.micro"]
+  },
+  "resolution": {
+    "exclusive_group": "camera.motion.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": ["subtle_still_motion"]
+  },
   "instructions": "图生视频通用模板：缓慢推进镜头——\n1. 运镜：single slow push-in toward the subject（从首帧构图向主体缓慢推进，全程匀速）。\n2. 幅度限定：subtle / gradual / barely perceptible 级推进（避免快速 zoom 的生硬感）。\n3. 配合微动态：推进同时保留主体细微动态（呼吸/发丝/眼神），避免「死画面推镜」。\n4. 情绪用途：氛围建立、悬念铺垫、情绪收束。\n5. 负面：no zoom out, no camera shake, no rapid zoom, no jump cut。"
 }

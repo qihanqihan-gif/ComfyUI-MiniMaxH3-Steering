@@ -1,0 +1,51 @@
+{
+  "id": "scene_minimalist_product_ad",
+  "title_zh": "极简产品广告",
+  "version": 3,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: minimalist-product-ad-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/minimalist-product-ad-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["product_reference_required", "minimal_composition", "single_selling_point", "precise_copy"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "用已连接的真实产品参考和一个卖点构成留白充分、产品身份稳定的极简广告节拍。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "minimalist_product_ad"},
+      {"path": "product.presentation", "value": "single_product_single_selling_point_clean_hierarchy"}
+    ],
+    "preserves": [
+      "product.geometry",
+      "product.color_material_and_finish",
+      "product.logo_and_packaging_text",
+      "visible_text.verbatim",
+      "camera.motion.primary",
+      "visual.medium.primary"
+    ],
+    "forbids": [
+      "product_ad_without_connected_reference",
+      "invented_claim_parameter_or_brand_copy",
+      "product_shape_logo_or_packaging_drift",
+      "multiple_simultaneous_copy_blocks",
+      "background_clutter_competing_with_product"
+    ],
+    "defaults": [
+      {"path": "product.selling_point_count", "value": 1},
+      {"path": "visible_text.max_simultaneous_lines", "value": 1},
+      {"path": "visual.composition", "value": "clean_negative_space_and_limited_palette"}
+    ]
+  },
+  "ownership": {
+    "reads": ["references.product", "product.facts", "visible_text.user_copy", "camera.motion.primary"],
+    "writes": ["scene.recipe.primary"],
+    "augments": ["product.presentation", "visual.composition", "visible_text.presentation", "audio.beat_alignment"]
+  },
+  "resolution": {
+    "exclusive_group": "scene.recipe.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "极简产品广告配方：仅在已连接真实产品参考时使用，并只突出一个用户给定的卖点。\n1. 把产品作为稳定视觉锚点，逐镜保持轮廓、比例、部件位置、主色、材质、表面处理、logo 与包装文字；参考素材只负责产品事实和身份，不把多张参考图误读成顺序分镜。\n2. 使用留白、有限色板和清楚层级，从英雄视角、材质/功能特写或收束构图中安排一个简洁节拍；沿用其它规则指定的画风与主运镜。\n3. 可见文案必须来自用户原文，同一时刻最多一行短句，颜色与产品主色协调，不遮挡产品关键结构。没有文案、音乐或卡点要求时不要自行补造。\n4. 防止产品形变、比例漂移、logo 与包装乱码、虚构参数或功效，以及背景道具、光效和多块文字争抢主体。"
+}

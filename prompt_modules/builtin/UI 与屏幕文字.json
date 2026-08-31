@@ -1,0 +1,48 @@
+{
+  "id": "ui_screen_text",
+  "title_zh": "UI 与屏幕文字",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "visible_text",
+  "source": "MiniMax-H3 official visible-text preservation guidance",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["verbatim_visible_text", "layout_hierarchy", "readability_timing", "ui_state"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "逐字保留用户提供的 UI、招牌、字幕和屏幕文字，并明确承载物、层级、位置与可读时长。",
+    "adds": [
+      {"path": "visible_text.policy.primary", "value": "verbatim_user_text_with_explicit_layout_and_timing"}
+    ],
+    "preserves": [
+      "visible_text.verbatim",
+      "visible_text.original_language",
+      "visible_text.case_spacing_and_punctuation",
+      "ui.layout_hierarchy",
+      "subject.key_face_and_action_visibility",
+      "dialogue.verbatim"
+    ],
+    "forbids": [
+      "invented_brand_product_button_or_subtitle_copy",
+      "random_microtext_or_unrelated_characters",
+      "multiple_unreadable_text_blocks",
+      "text_covering_key_face_or_action",
+      "speaker_mapping_created_from_silent_text"
+    ],
+    "defaults": [
+      {"path": "visible_text.density", "value": "only_currently_readable_essential_copy"}
+    ]
+  },
+  "ownership": {
+    "reads": ["visible_text.user_copy", "ui.user_state", "scene.composition", "dialogue.timeline"],
+    "writes": ["visible_text.policy.primary"],
+    "augments": ["visible_text.layout", "visible_text.readability_timing", "ui.state_transition"]
+  },
+  "resolution": {
+    "exclusive_group": "visible_text.policy.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "UI 与屏幕文字规则：仅采用用户明确给出的可见文字，逐字保留原语言、大小写、空格和标点；具体字段格式由核心协议处理。\n1. 对每段文字写清承载物、画面位置、字号层级、颜色/对比、出现与离场时机及可读时长；同一时刻只保留当前镜头真正需要读清的内容。\n2. 游戏或应用界面只描述必要布局、主控件和当前交互状态，不在一个短镜头中塞入完整多页界面，也不让文字遮挡关键面部、口型、产品结构或动作。\n3. 不替用户发明品牌名、产品声明、按钮文案、歌词、字幕或包装小字；未提供原文时保持无字或极简，避免随机字符和无关小字。\n4. 字幕与对白同步时只对齐真实发声者和对应时间段；纯界面文字、招牌和无声字幕不会凭空产生说话人。"
+}

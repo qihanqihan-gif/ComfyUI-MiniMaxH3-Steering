@@ -1,0 +1,44 @@
+{
+  "id": "negative_guidance",
+  "title_zh": "负面约束生成规则",
+  "version": 3,
+  "scope": "全部",
+  "category": "constraints",
+  "source": "Project heuristic derived from observed H3 failure modes",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": ["semantic_exclusions", "risk_gating", "constraint_deduplication"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "根据当前任务和已生效规则生成少量语义排除条件，只阻止真实高风险失败。",
+    "adds": [
+      {"path": "constraints.semantic_exclusions", "value": "risk_conditioned_only"}
+    ],
+    "preserves": [
+      "user.positive_intent",
+      "applied_rules.requirements",
+      "media.reference_truth"
+    ],
+    "forbids": [
+      "fixed_negative_boilerplate",
+      "unsupported_control_tokens",
+      "constraint_that_cancels_positive_intent",
+      "duplicate_or_speculative_constraints"
+    ],
+    "defaults": [
+      {"path": "constraints.semantic_exclusions.max_count", "value": 3}
+    ]
+  },
+  "ownership": {
+    "reads": ["task.intent", "media.references", "applied_rules", "known_failure_risks"],
+    "writes": ["constraints.semantic_exclusions"],
+    "augments": []
+  },
+  "resolution": {
+    "exclusive_group": "",
+    "priority": 30,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "风险约束规则：把约束作为正向提示词语义中的少量排除条件，不假设存在独立负面提示词通道。\n1. 先读取用户目标、实际连接素材和已经生效的规则；只有能够指出具体失败对象与触发原因时才添加约束，没有明显风险时可以不添加。\n2. 最多保留 3 条短而具体的自然语言约束。例如多人近距离接触才防身份交换或身体融合，肢体特写才防多余肢体，明确不要文字时才防随机字幕。\n3. 不重复身份、镜头、循环或文字模块已经表达的要求，不使用特殊控制标记，也不把新的风格、动作或构图偏好伪装成排除条件。\n4. 若某条约束会取消用户要求的动作、镜头、声音或可见文字，删除该约束；正向任务目标始终优先。"
+}
