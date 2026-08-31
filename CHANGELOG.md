@@ -1,8 +1,10 @@
 # Changelog
 
-本项目按发布版本记录面向用户的变化。尚未确定版本号的本地开发内容先归入 `Unreleased`。
+本项目按发布版本记录面向用户的变化。尚未发布的开发内容归入 `Unreleased`。
 
 ## Unreleased
+
+## 0.3.0-alpha - 2026-09-01
 
 ### Added
 
