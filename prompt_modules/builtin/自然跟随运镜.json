@@ -1,0 +1,43 @@
+{
+  "id": "natural_camera_follow",
+  "title_zh": "自然跟随运镜",
+  "version": 3,
+  "scope": "全部",
+  "category": "camera",
+  "source": "MiniMax-H3 official camera vocabulary + action-legibility heuristic",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["tracking", "camera_follow", "action_legibility", "framing"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "让主镜头根据主体位移自然跟随，以动作可读性而不是炫技为目标。",
+    "adds": [
+      {"path": "camera.motion.primary", "value": "subject_follow"}
+    ],
+    "preserves": [
+      "continuity.screen_direction",
+      "continuity.spatial",
+      "subject.action_legibility"
+    ],
+    "forbids": [
+      "unmotivated_camera_whip",
+      "continuous_reframing_without_subject_motion",
+      "camera_motion_that_obscures_primary_action"
+    ],
+    "defaults": [
+      {"path": "camera.motion.end_state", "value": "settled_composition"}
+    ]
+  },
+  "ownership": {
+    "reads": ["subject.motion"],
+    "writes": ["camera.motion.primary"],
+    "augments": ["continuity.screen_direction"]
+  },
+  "resolution": {
+    "exclusive_group": "camera.motion.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "自然跟随运镜规则：先确定主体真实发生的位移，再让一个主要跟随方式服务动作可读性。\n1. 写清主体移动方向、速度、路径和目标；根据动作选择 tracking、truck、pan 或克制的手持跟随之一，不堆叠互相竞争的主运镜。\n2. 镜头可以小幅滞后、重新居中或短暂揭示环境，但每次调整都应由主体运动或叙事信息触发，不能无理由甩动或持续找构图。\n3. 使用前景遮挡、地面参照物与背景视差说明真实位移，同时保持地平线、屏幕方向和人物空间位置连续。\n4. 快速动作只有在可读性确实需要时才增加轻微震动；对白、产品和细节展示应降低幅度。动作结束后落到稳定构图，不在片尾继续漂移。"
+}

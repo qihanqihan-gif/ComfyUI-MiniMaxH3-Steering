@@ -1,0 +1,47 @@
+{
+  "id": "cinematic_realism",
+  "title_zh": "写实电影感",
+  "version": 3,
+  "scope": "全部",
+  "category": "visual_style",
+  "source": "MiniMax-H3 official prompt guide camera/style principles + project heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["cinematic_photorealism", "motivated_lighting", "material_response", "photographic_depth"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "建立可信的写实电影成像、光线和材质表现，不接管主运镜、身份、时间线或声音设计。",
+    "adds": [
+      {"path": "visual.medium.primary", "value": "cinematic_photorealism"},
+      {"path": "visual.lighting.primary", "value": "physically_motivated"}
+    ],
+    "preserves": [
+      "subject.identity",
+      "subject.user_requested_action",
+      "camera.motion.primary",
+      "timeline.layout.primary",
+      "user.color_intent"
+    ],
+    "forbids": [
+      "fixed_cinematic_filter_stack",
+      "contradictory_visual_media",
+      "waxy_material_response",
+      "lighting_without_scene_source"
+    ],
+    "defaults": [
+      {"path": "visual.exposure", "value": "natural_highlight_and_shadow_rolloff"}
+    ]
+  },
+  "ownership": {
+    "reads": ["scene.environment", "subject.materials", "user.color_intent"],
+    "writes": ["visual.medium.primary", "visual.lighting.primary"],
+    "augments": ["visual.material_response", "visual.depth_cues"]
+  },
+  "resolution": {
+    "exclusive_group": "visual.medium.primary",
+    "priority": 40,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "写实电影成像规则：只负责画面媒介、光线、材质和摄影层次，不指定主运镜、分镜、身份或声音。\n1. 根据题材选择可信的写实成像方向，如自然纪录、克制商业摄影、生活纪实或棚拍质感；不要默认叠加 anamorphic、film grain、teal-orange 等固定词包。\n2. 写清可解释的主光来源、方向、软硬、色温与环境反射，让曝光、阴影和高光符合场景条件。\n3. 皮肤、布料、金属、玻璃和湿润表面只描述与可见材质相符的反射、粗糙度和透光关系，避免蜡质、塑料感或无来源轮廓光。\n4. 用前中后景、空气透视、景深和自然动态范围建立摄影层次，同时保留用户已经指定的色彩意图和其他模块的动作、镜头与时间结构。"
+}

@@ -1,0 +1,49 @@
+{
+  "id": "anime_identity",
+  "title_zh": "动漫角色身份保持",
+  "version": 3,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "identity",
+  "source": "MiniMax-H3 official reference-role guidance + project identity heuristics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["connected_character_reference", "anime_identity", "pose_independence", "expression_timing"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "从已连接角色参考中提取稳定身份锚点，同时让姿势、动作和表情继续服从用户意图。",
+    "adds": [
+      {"path": "identity.character.reference_fidelity", "value": "preserve_shared_visible_identity_anchors"}
+    ],
+    "preserves": [
+      "subject.face_structure",
+      "subject.hair_silhouette",
+      "subject.costume_shape_and_key_colors",
+      "subject.signature_features",
+      "user.requested_pose_action_and_expression",
+      "camera.motion.primary"
+    ],
+    "forbids": [
+      "identity_rule_without_connected_character_reference",
+      "lock_incidental_reference_pose_or_expression",
+      "infer_personality_from_appearance",
+      "exhaustive_restatement_of_every_reference_detail",
+      "cross_character_identity_leak"
+    ],
+    "defaults": [
+      {"path": "identity.character.anchor_budget", "value": "few_high_signal_visible_traits"},
+      {"path": "performance.micro_expression_count", "value": 2}
+    ]
+  },
+  "ownership": {
+    "reads": ["media.connected_character_references", "user.requested_action", "user.requested_expression"],
+    "writes": ["identity.character.reference_fidelity"],
+    "augments": ["continuity.face_hair_costume", "performance.micro_expression_timing"]
+  },
+  "resolution": {
+    "exclusive_group": "identity.character.reference_fidelity",
+    "priority": 55,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "动漫角色身份保持规则：仅在确实连接角色参考素材时使用，只锁定高辨识度身份，不接管动作、表情、构图或运镜。\n1. 从多张参考共同支持的可见证据中选择少量强锚点：脸部结构、发型轮廓、服装版型、关键配色、饰品或身体标志；视图差异按同一角色合并，不把偶然光影当成身份。\n2. 参考图中的姿势、视线、表情和构图只描述该张图片，不自动固化到整段视频；目标姿势、动作路径和情绪仍由用户意图决定。\n3. 将笼统的“表情丰富”改成最多 1–2 个可见微表情及发生时机，同时保持脸型、发型、服装和关键配色连续。\n4. 不依据外表臆测性格，不重复罗列参考图全部细节，也不把一个角色的特征泄漏到另一角色。"
+}

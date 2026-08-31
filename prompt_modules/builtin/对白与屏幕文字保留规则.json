@@ -1,0 +1,13 @@
+{
+  "id": "dialogue_verbatim",
+  "title_zh": "对白与屏幕文字保留规则",
+  "version": 2,
+  "scope": "全部",
+  "deprecated": true,
+  "source": "Superseded by dialogue_performance and ui_screen_text rules",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["legacy_alias"],
+  "conflicts": [],
+  "instructions": "【旧版兼容文件，不再列为可选模块】对白表演使用 dialogue_performance，屏幕文字使用 ui_screen_text；说话人 ID 只分配给实际发声者。"
+}

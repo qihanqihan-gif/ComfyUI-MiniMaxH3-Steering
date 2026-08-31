@@ -1,0 +1,57 @@
+{
+  "id": "character_replacement",
+  "title_zh": "人物替换（Ref2VA 换人复刻）",
+  "version": 3,
+  "scope": "Ref2VA",
+  "category": "task",
+  "source": "MiniMaxH3-Lab character-replacement regression synthesis + official Ref2VA format alignment",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "experimental",
+  "features": [
+    "character_replacement",
+    "motion_transfer",
+    "reference_generation",
+    "hard_lock",
+    "multi_reference"
+  ],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "用已连接参考图定义的目标角色替换参考视频中的原表演者，只改变人物身份。",
+    "adds": [
+      {"path": "task.intent", "value": "reference_character_replacement"},
+      {"path": "identity.policy.primary", "value": "replace_video_performer_with_connected_subject"},
+      {"path": "motion.transfer", "value": "source_video_performance_to_target_subject"}
+    ],
+    "preserves": [
+      "source_video.background",
+      "source_video.environment",
+      "source_video.lighting",
+      "source_video.composition",
+      "source_video.camera",
+      "source_video.editing",
+      "source_video.timeline",
+      "target_subject.identity"
+    ],
+    "forbids": [
+      "preserve_source_performer_identity",
+      "invent_unconnected_subject_or_picture_labels",
+      "replace_background_or_camera_without_user_request",
+      "reinterpret_replacement_as_video_continuation"
+    ],
+    "defaults": [
+      {"path": "retention.video", "value": "partially_preserved"}
+    ]
+  },
+  "ownership": {
+    "reads": ["media.references", "media.video_timeline"],
+    "writes": ["task.intent", "identity.policy.primary"],
+    "augments": ["motion.transfer", "retention.video"]
+  },
+  "resolution": {
+    "exclusive_group": "identity.policy.primary",
+    "priority": 90,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "人物替换规则（仅 Ref2VA）：把任务定义为参考视频中的表演者身份替换，而不是续写、重绘或重新设计整段视频。\n1. 目标角色身份只来自本次已连接参考图；多视图若属于同一角色，应合并为同一个逻辑主体，只锁定各视图共同支持的可见身份特征。\n2. 参考视频提供动作、姿态、节奏、手势、表情时点和空间路径，但不提供需要保留的原人物脸、发型、服装或身体身份。\n3. 对参考视频采用部分保留：背景、环境、灯光、构图、运镜、剪辑和时间结构保持不变；除非用户另有明确要求，不新增场景、不改镜头、不改事件顺序。\n4. 分镜只描述视频证据支持的时点，让目标角色执行原表演；不要把参考图的姿势、表情或构图误写成全片固定属性。\n5. 只引用素材清单中实际存在的标签，保持 Picture、Subject、Video 编号稳定；不得沿用上一任务的角色特征或虚构未连接素材。"
+}

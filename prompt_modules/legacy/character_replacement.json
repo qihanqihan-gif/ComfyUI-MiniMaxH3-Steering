@@ -1,0 +1,39 @@
+{
+  "id": "character_replacement",
+  "title_zh": "人物替换（Ref2VA 换人复刻）",
+  "version": 2,
+  "scope": "Ref2VA",
+  "category": "task",
+  "source": "本工作区 GPT半通用替换模板-对照验收-2026-08-16.md 合并版 + h3-character-replacement-合并版SKILL-2026-08-16.md",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": [
+    "character_replacement",
+    "motion_transfer",
+    "reference_generation",
+    "hard_lock",
+    "multi_reference"
+  ],
+  "conflicts": [
+    "seamless_loop",
+    "live_wallpaper"
+  ],
+  "semantic_contract": {
+    "task_intent": "reference_character_replacement",
+    "preserve": ["source_video.background", "source_video.camera", "source_video.timing"],
+    "replace": ["source_video.performer_identity"],
+    "transfer": ["source_video.motion", "source_video.performance_timing"]
+  },
+  "ownership": {
+    "reads": ["media.references", "media.video_timeline"],
+    "writes": ["task.intent", "identity.policy.primary", "background.policy.primary"],
+    "augments": ["motion.transfer"]
+  },
+  "resolution": {
+    "exclusive_group": "identity.policy.primary",
+    "priority": 90,
+    "requires": [],
+    "conflicts": ["seamless_loop", "live_wallpaper"]
+  },
+  "instructions": "人物替换策略：仅在目标是用参考图角色替换参考视频原人物，同时保留原视频背景、动作、镜头与时间结构时使用。\n1. summary 将任务定义为 [reference generation] 的角色替换与动作迁移；不要把任务写成 continuation，也不要要求复现原人物身份。\n2. retention_analysis 对 <Video N> 写 partially_preserved：保留背景、环境、灯光、构图、运镜、剪辑与时间结构；把动作、姿态、节奏、手势、表情时点和空间路径转移给新 <Subject N>；明确不保留原人物的身份、脸、发型和服装。\n3. 新角色身份只来自实际连接的 <Picture N>/<Subject N>。只锁定少量可见身份特征，不把姿势、表情或参考图构图误写成永久身份。\n4. 背景描述引用 <Video N> 的原背景，不另行创造场景；分镜只使用视频分析能够支持的时间点。\n5. 多视图素材必须声明这些画面描述的是同一个角色，并保持 Picture、Subject 与实际接线编号一致。\n6. 用户更换角色或参考图时，只使用当前素材可验证的特征，不沿用先前任务的专属外观条款。"
+}

@@ -1,0 +1,50 @@
+{
+  "id": "scene_brand_promo",
+  "title_zh": "品牌宣传视频",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: brand-promo-video-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/brand-promo-video-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["brand_fidelity", "product_demo", "verified_claims", "optional_cta"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "围绕一个可验证的品牌或产品事实完成单焦点宣传节拍，不编造品牌资产、声明或行动号召。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "brand_promo_short"},
+      {"path": "brand.communication", "value": "single_verified_promo_focus"}
+    ],
+    "preserves": [
+      "brand.authentic_assets",
+      "product.geometry_and_materials",
+      "visible_text.verbatim",
+      "user.claims.verbatim",
+      "camera.motion.primary",
+      "visual.medium.primary"
+    ],
+    "forbids": [
+      "invented_product_claims_prices_certifications_or_slogans",
+      "approximated_logo_wordmark_ui_or_packaging",
+      "multiple_competing_promo_messages",
+      "unsupplied_call_to_action",
+      "random_microtext"
+    ],
+    "defaults": [
+      {"path": "brand.communication.focus_count", "value": 1},
+      {"path": "visible_text.policy", "value": "only_user_supplied_short_copy"}
+    ]
+  },
+  "ownership": {
+    "reads": ["brand.authentic_assets", "product.facts", "user.claims", "visible_text.user_copy"],
+    "writes": ["scene.recipe.primary"],
+    "augments": ["brand.communication", "product.visual_evidence", "visible_text.presentation", "audio.brand_tone"]
+  },
+  "resolution": {
+    "exclusive_group": "scene.recipe.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "品牌宣传短片配方：在当前时长内只表达一个可验证的宣传焦点。\n1. 只沿用用户文字和已连接参考素材中明确存在的 logo、字标、产品外观、界面、包装、功能、数据与声明；来源不明时不要近似重画或补写。\n2. 从产品揭示、核心用例、功能证据或品牌收束中选择一个主节拍，让卖点通过可见操作、使用情境或材质细节被看见，而不是堆叠抽象文案。\n3. 品牌配色、字体气质、标志位置、产品比例和界面状态保持连续；所有可见文字逐字保留，行动号召仅在用户提供时出现。\n4. 沿用其它规则指定的画风与主运镜；声音只服务于同一宣传焦点，避免无依据的功能、价格、认证、口号和随机小字。"
+}

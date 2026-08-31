@@ -1,0 +1,51 @@
+{
+  "id": "live_wallpaper",
+  "title_zh": "动态壁纸（无缝循环）",
+  "version": 3,
+  "scope": "I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "presentation",
+  "source": "Community live-wallpaper recipe aligned with MiniMax-H3 temporal guidance",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["wallpaper_safe_composition", "ambient_motion_budget", "closed_loop", "stable_subject"],
+  "conflicts": ["storyboard_reference_map", "slow_push_in", "motion_emphasis"],
+  "semantic_contract": {
+    "purpose": "把参考画面转成主体稳定、留有界面安全区、低幅氛围运动自然闭环的动态壁纸。",
+    "adds": [
+      {"path": "presentation.wallpaper.primary", "value": "stable_safe_zone_ambient_wallpaper"},
+      {"path": "timeline.loop.primary", "value": "closed_ambient_motion_and_light_state"}
+    ],
+    "preserves": [
+      "subject.identity_and_primary_pose",
+      "continuity.composition_anchor",
+      "scene.structure",
+      "user.aspect_ratio_and_duration",
+      "interface_safe_zone",
+      "motion.micro_when_provided_by_other_rule"
+    ],
+    "forbids": [
+      "unrequested_large_subject_action",
+      "scene_cut_or_major_relayout",
+      "edge_critical_subject_under_interface",
+      "light_flicker_or_visible_loop_seam",
+      "exact_end_frame_claim_without_compatible_anchor"
+    ],
+    "defaults": [
+      {"path": "motion.ambient.count", "value": 3},
+      {"path": "camera.motion.primary", "value": "static_when_unspecified"},
+      {"path": "timeline.layout.primary", "value": "single_shot_when_unspecified"}
+    ]
+  },
+  "ownership": {
+    "reads": ["image.composition", "subject.identity", "user.aspect_ratio", "motion.micro"],
+    "writes": ["presentation.wallpaper.primary", "timeline.loop.primary"],
+    "augments": ["presentation.safe_zone", "motion.ambient", "continuity.end_to_start"]
+  },
+  "resolution": {
+    "exclusive_group": ["presentation.wallpaper.primary", "timeline.loop.primary"],
+    "priority": 65,
+    "requires": [],
+    "conflicts": ["storyboard_reference_map", "slow_push_in", "motion_emphasis"]
+  },
+  "instructions": "动态壁纸规则：保持参考画面的主体、主要姿势、构图与场景结构稳定，只加入低幅氛围运动和自然闭环。\n1. 尊重用户给定的宽高比与时长；根据常见界面遮挡风险保留顶部、底部或边缘安全区，关键脸部、文字和产品结构不要贴近高风险边缘，但不擅自改变画幅。\n2. 若未另选细微动态规则，从发丝/衣角、云/水波、粒子/光影等不同层级中选择最多 1–3 项低幅、低速运动；已有细微动态时沿用其对象和节奏，不重复堆叠。\n3. 未另行指定时采用固定机位、单镜无切；片尾的主体状态、构图、光照相位和运动速度回到片头，避免闪烁和可见接缝。\n4. 不添加无关大动作、切镜或场景重排；只有实际提供兼容首尾锚点时才声明强首尾对齐。"
+}

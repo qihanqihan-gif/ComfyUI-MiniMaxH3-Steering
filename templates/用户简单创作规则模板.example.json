@@ -1,0 +1,15 @@
+{
+  "id": "my_custom_rule",
+  "title_zh": "我的创作规则",
+  "version": 1,
+  "scope": "全部",
+  "category": "custom",
+  "source": "user_local",
+  "source_url": "",
+  "evidence_level": "experimental",
+  "features": [
+    "custom"
+  ],
+  "conflicts": [],
+  "instructions": "只描述这一条规则负责的创作目标。\n写清必须保留的内容、允许变化的内容，以及需要避免的结果。"
+}

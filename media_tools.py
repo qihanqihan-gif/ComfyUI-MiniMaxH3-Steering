@@ -10,6 +10,7 @@ SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import ctypes
+import json
 import math
 import time
 from typing import Any
@@ -129,6 +130,129 @@ def _sample_frames(images: torch.Tensor, count: int, strategy: str) -> tuple[tor
         indices = sampled.tolist()
     index = torch.tensor(indices, device=images.device, dtype=torch.long)
     return images.index_select(0, index), indices
+
+
+def _format_timecode(seconds: float, fps: int = H3_FPS) -> str:
+    """秒 → "MM:SS.mmm"，H3 官方时间码格式（如 "00:02" / "At 00:05.250"）。"""
+    seconds = max(0.0, float(seconds))
+    minutes = int(seconds // 60)
+    remainder = seconds - minutes * 60
+    sec_int = int(remainder)
+    millis = int(round((remainder - sec_int) * 1000))
+    if millis >= 1000:  # 进位
+        millis = 0
+        sec_int += 1
+    if sec_int >= 60:
+        sec_int -= 60
+        minutes += 1
+    return f"{minutes:02d}:{sec_int:02d}.{millis:03d}"
+
+
+def _parse_shot_boundaries(value: str, duration_seconds: float) -> list[float]:
+    """解析用户切镜边界字符串 → 秒列表（升序、去重、锚定在 [0, duration]）。
+
+    支持逗号/空格分隔的绝对秒（"0,2.5,5"）或百分比（"0%,50%,100%"），混用亦可
+    （"0,50%" 表示 0 秒与 50% 时长）。空串或 None 表示无显式切镜 → 返回空列表。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return []
+    bounds: list[float] = []
+    for token in text.replace(",", " ").split():
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            if token.endswith("%"):
+                bounds.append(float(token[:-1]) / 100.0 * max(0.0, duration_seconds))
+            else:
+                bounds.append(float(token))
+        except ValueError as exc:
+            raise ValueError(
+                f"切镜边界 '{token!r}' 无法解析；请用秒（如 0,2.5,5）或百分比（如 0%,50%,100%）。"
+            ) from exc
+    bounds = [min(max(0.0, b), max(0.0, duration_seconds)) for b in bounds]
+    bounds = sorted(set(round(b, 6) for b in bounds))
+    return bounds
+
+
+def _build_timeline_manifest(
+    sequence_total: int,
+    fps: float,
+    duration_seconds: float,
+    sampled_indices: list[int],
+    shot_boundaries: list[float],
+    selection_mode: str,
+) -> dict:
+    """确定性生成 <Video 1> 时间线 manifest（不调用 LLM）。
+
+    时间码一律基于源帧索引（source_index / fps），而非抽帧后的序号，这样在
+    prompt 里能表达真实时间线位置。切镜分段只做确定性边界计算，不推断语义。
+    """
+    denom = max(1, sequence_total - 1)
+    frames = []
+    for ordinal, src_idx in enumerate(sampled_indices, start=1):
+        t_sec = src_idx / float(fps)
+        position = 0.0 if sequence_total <= 1 else src_idx / denom
+        frames.append({
+            "frame": int(src_idx),
+            "time_sec": round(t_sec, 4),
+            "timecode": _format_timecode(t_sec, fps),
+            "position": round(position, 4),
+        })
+
+    # 只把真正落在开区间 (0, duration) 内的点当作内部切镜点；首尾由段自动生成，
+    # 避免用户把 0 / 全长也写进边界造成 0 长度或重复段。
+    internal = sorted(
+        b for b in shot_boundaries if b > 0.0 and b < duration_seconds
+    )
+    segments = []
+    if internal:
+        start = 0.0
+        for idx, end in enumerate(internal, start=1):
+            segments.append({
+                "segment": idx,
+                "start_sec": round(start, 4),
+                "start_timecode": _format_timecode(start, fps),
+                "end_sec": round(end, 4),
+                "end_timecode": _format_timecode(end, fps),
+                "start_frame": int(round(start * fps)),
+                "end_frame": int(round(end * fps)),
+            })
+            start = end
+        if start < duration_seconds:
+            segments.append({
+                "segment": len(segments) + 1,
+                "start_sec": round(start, 4),
+                "start_timecode": _format_timecode(start, fps),
+                "end_sec": round(duration_seconds, 4),
+                "end_timecode": _format_timecode(duration_seconds, fps),
+                "start_frame": int(round(start * fps)),
+                "end_frame": int(round(duration_seconds * fps)),
+            })
+    else:
+        segments.append({
+            "segment": 1,
+            "start_sec": 0.0,
+            "start_timecode": _format_timecode(0.0, fps),
+            "end_sec": round(duration_seconds, 4),
+            "end_timecode": _format_timecode(duration_seconds, fps),
+            "start_frame": 0,
+            "end_frame": sequence_total,
+        })
+
+    return {
+        "sequence_label": "<Video 1>",
+        "fps": round(float(fps), 3),
+        "total_frames": int(sequence_total),
+        "duration_seconds": round(duration_seconds, 4),
+        "sample_mode": selection_mode,
+        "selected_count": len(sampled_indices),
+        "selected_indices": [int(i) for i in sampled_indices],
+        "frames": frames,
+        "segments": segments,
+        "shot_boundaries_input": [round(b, 4) for b in internal],
+    }
 
 
 def _prepare_geometry(
@@ -576,12 +700,115 @@ class MiniMaxH3ReferenceInspector:
         }
 
 
+class MiniMaxH3VideoContext:
+    """把一段参考视频帧 batch 转成“所选帧 + <Video 1> 时间线 manifest”。
+
+    纯确定性节点（不调用 LLM）：按键确定帧采样、按源帧索引归一化时间码、
+    按用户提供的切镜边界切分段。输出可直接接 Local/Cloud Director 的
+    ``video_frame_sequence`` 与时间线提示词，保证“抽帧压缩多少帧都不丢时间轴”。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls) -> dict:
+        return {
+            "required": {
+                "video_frame_sequence": ("IMAGE",),
+                "fps": (
+                    "FLOAT",
+                    {"default": H3_FPS, "min": 1.0, "max": 120.0, "step": 1.0,
+                     "tooltip": "源视频帧率；H3 官方参考视频按 24 FPS 解释"},
+                ),
+                "duration_seconds": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.5,
+                     "tooltip": "0=由总帧数/fps 推导；>0 则用该值并标注推算来源"},
+                ),
+                "frame_sequence_limit": (
+                    "INT",
+                    {"default": 48, "min": 0, "max": 300, "step": 1,
+                     "tooltip": "0=保留全部帧；>0 则按选帧方式取代表帧"},
+                ),
+                "frame_selection_mode": (
+                    ["head", "uniform"],
+                    {"default": "uniform",
+                     "tooltip": "head=取开头 N 帧；uniform=均匀覆盖完整时间线（保首尾）"},
+                ),
+                "shot_boundaries": (
+                    "STRING",
+                    {"default": "", "multiline": False,
+                     "placeholder": "可选：真实切镜点，秒或百分比，如 0,2.5,5 或 0%,50%,100%"},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("selected_frames", "timeline_manifest", "report")
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3 Lab/Media"
+    DESCRIPTION = (
+        "Deterministic <Video 1> timeline context: sample frames, normalize timecodes, "
+        "split shots, and emit a JSON manifest without calling any LLM."
+    )
+
+    def build(
+        self,
+        video_frame_sequence: torch.Tensor,
+        fps: float,
+        duration_seconds: float,
+        frame_sequence_limit: int,
+        frame_selection_mode: str,
+        shot_boundaries: str,
+    ) -> tuple[torch.Tensor, str, str]:
+        started = time.perf_counter()
+        if not isinstance(video_frame_sequence, torch.Tensor) or video_frame_sequence.ndim != 4:
+            raise ValueError("MiniMax H3 Video Context expects IMAGE [frames, height, width, channels]")
+        total = int(video_frame_sequence.shape[0])
+        if total < 1:
+            raise ValueError("MiniMax H3 Video Context 输入帧批次为空")
+        fps = max(1.0, float(fps))
+        limit = int(frame_sequence_limit or 0)
+        if limit > 0 and limit < total:
+            selected, indices = _sample_frames(video_frame_sequence, limit, frame_selection_mode)
+        else:
+            selected = video_frame_sequence
+            indices = list(range(total))
+        infer_duration = round(total / fps, 4)
+        duration = round(float(duration_seconds or 0.0), 4)
+        duration_used = duration if duration > 0 else infer_duration
+        bounds = _parse_shot_boundaries(shot_boundaries, duration_used)
+        manifest = _build_timeline_manifest(
+            total, fps, duration_used, indices,
+            bounds, frame_selection_mode if limit > 0 and limit < total else "all",
+        )
+        manifest["duration_source"] = "explicit" if duration > 0 else "inferred"
+        manifest["inferred_duration_seconds"] = infer_duration
+
+        summary = []
+        if bounds:
+            summary.append(f"{len(bounds)} 个切镜边界：{', '.join(_format_timecode(b, fps) for b in bounds)}")
+        else:
+            summary.append("未提供显式切镜边界，按单段处理（不推断语义）")
+        report = (
+            "MiniMax H3 <Video 1> 时间线 Context\n"
+            f"总帧数：{total}；fps：{fps:g}；时长：{duration_used:.2f}s"
+            f"（{'显式' if duration > 0 else '由帧数/fps 推算'}）\n"
+            f"采样：{len(indices)}/{total} 帧，模式={manifest['sample_mode']}\n"
+            f"选帧索引：{'…'.join(str(x) for x in (indices[:6] + (['…'] if len(indices) > 6 else []) + indices[-3:])) if indices else ''}\n"
+            + "\n".join(summary)
+            + "\n提示：该 manifest 是确定性的帧选择与时间码，不调用 LLM、不含语义推断；"
+              "实际切镜/动作阶段语义由后续分析层基于该时间轴提炼。"
+        )
+        return selected, json.dumps(manifest, ensure_ascii=False, indent=2), report
+
+
 NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ReferenceMediaPrep": MiniMaxH3ReferenceMediaPrep,
     "MiniMaxH3ReferenceInspector": MiniMaxH3ReferenceInspector,
+    "MiniMaxH3VideoContext": MiniMaxH3VideoContext,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ReferenceMediaPrep": "MiniMax H3 Reference Media Prep",
     "MiniMaxH3ReferenceInspector": "MiniMax H3 Reference Inspector",
+    "MiniMaxH3VideoContext": "MiniMax H3 Video Timeline Context",
 }

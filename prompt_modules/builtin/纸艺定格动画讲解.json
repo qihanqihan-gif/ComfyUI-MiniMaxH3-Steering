@@ -1,0 +1,51 @@
+{
+  "id": "scene_papercraft_stopmotion",
+  "title_zh": "纸艺定格动画讲解",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: papercraft-stop-motion-explainer",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/papercraft-stop-motion-explainer",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["papercraft_diorama", "stop_motion", "paper_mechanisms", "multiplane_depth"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "把一个知识关系做成有厚度的纸艺微缩舞台，以纸机构和逐帧动作呈现空间层次。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "papercraft_stopmotion_explainer"},
+      {"path": "visual.medium.primary", "value": "handmade_multiplane_papercraft_diorama"},
+      {"path": "motion.stopmotion", "value": "stepped_paper_mechanism_motion"}
+    ],
+    "preserves": [
+      "user.learning_goal",
+      "user.factual_content",
+      "visible_text.verbatim",
+      "camera.motion.primary",
+      "scene.layer_order"
+    ],
+    "forbids": [
+      "smooth_cg_or_plastic_surface",
+      "paper_like_flat_vector_without_physical_depth",
+      "large_fluid_motion_breaking_stopmotion_scale",
+      "static_background_without_layer_response",
+      "invented_scientific_or_educational_claim"
+    ],
+    "defaults": [
+      {"path": "visual.depth", "value": "foreground_midground_background_far_background"},
+      {"path": "camera.style", "value": "restrained_macro_miniature_photography"},
+      {"path": "audio", "value": "paper_mechanism_sfx"}
+    ]
+  },
+  "ownership": {
+    "reads": ["user.learning_goal", "user.factual_content", "camera.motion.primary", "visible_text.user_copy"],
+    "writes": ["scene.recipe.primary", "visual.medium.primary"],
+    "augments": ["motion.stopmotion", "scene.multiplane_depth", "visual.paper_material", "audio.paper_mechanism_sfx"]
+  },
+  "resolution": {
+    "exclusive_group": ["scene.recipe.primary", "visual.medium.primary"],
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "纸艺定格讲解配方：把一个学习目标或知识关系变成可触摸的纸艺微缩舞台。\n1. 使用剪纸、立体书、分层 diorama、影盒或微缩纸模型；所有物体呈现卡纸厚度、纤维、折痕、切边、接缝、插片、铆钉、滑轨或拉页等真实纸机构，不能只贴一层纸纹。\n2. 建立前景遮挡、中景核心对象、背景和远景的多平面深度，以纸偶关节、拉页显露、转盘、翻页、滑轨和部件落位解释一个核心关系。动作保持逐帧小步、微停、轻回弹和落稳，背景纸机构也作相应运动。\n3. 镜头采用克制的微缩摄影层次；已有主运镜时保留其方向并控制幅度，避免流畅大幅运动破坏定格尺度。纸摩擦、翻页和机构碰撞声与动作同步。\n4. 文字和结论只采用用户内容，防止材质漂移为塑料 CG、平面矢量、普通实拍人物或缺少厚度的纸纹贴图。"
+}

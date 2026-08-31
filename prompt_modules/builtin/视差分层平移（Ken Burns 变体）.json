@@ -1,0 +1,49 @@
+{
+  "id": "parallax_motion",
+  "title_zh": "视差分层平移（Ken Burns 变体）",
+  "version": 3,
+  "scope": "I2VA,L2VA,Ref2VA",
+  "category": "camera",
+  "source": "Project parallax heuristic aligned with MiniMax-H3 camera and reference guidance",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "community_heuristic",
+  "features": ["depth_evidence_required", "primary_parallax_camera", "occlusion_change", "edge_safety"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "依据静帧中真实存在的前中后景深度，用克制视点位移产生可解释视差，不伪造可见纸层。",
+    "adds": [
+      {"path": "camera.motion.primary", "value": "evidence_based_lateral_parallax"},
+      {"path": "visual.depth_cues", "value": "foreground_moves_more_than_background_with_occlusion_change"}
+    ],
+    "preserves": [
+      "subject.identity_and_shape",
+      "scene.depth_order",
+      "continuity.composition_anchor",
+      "visible_text.legibility",
+      "timeline.loop_closure_when_requested"
+    ],
+    "forbids": [
+      "parallax_without_visible_depth_evidence",
+      "visible_cardboard_layer_separation",
+      "face_text_or_lineart_tearing",
+      "newly_exposed_empty_gaps",
+      "unbounded_viewpoint_drift"
+    ],
+    "defaults": [
+      {"path": "camera.motion.amplitude", "value": "low"},
+      {"path": "camera.motion.direction", "value": "single_lateral_or_shallow_dolly_path"}
+    ]
+  },
+  "ownership": {
+    "reads": ["image.depth_evidence", "scene.occlusion_order", "subject.edge_complexity", "timeline.loop.primary"],
+    "writes": ["camera.motion.primary"],
+    "augments": ["visual.depth_cues", "continuity.occlusion", "motion.material_micro"]
+  },
+  "resolution": {
+    "exclusive_group": "camera.motion.primary",
+    "priority": 50,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "视差分层平移规则：仅在输入画面确实具有清楚前景、中景、背景和遮挡关系时使用，并取得主运镜所有权。\n1. 选择一种克制的横向移镜、摇镜或浅幅移动，写清视点变化时哪些前景边缘掠过主体、哪些中景显露、远景如何缓慢相对位移；不要把画面描述成被硬切开的纸片层。\n2. 前景通常位移更明显、远景更缓，但幅度必须服从实际空间证据。人脸、文字、细线稿、透明物和复杂边界附近降低位移，防止拉裂、空洞和新增不可见区域。\n3. 每个深度层只补少量符合材质的微动，主体轮廓、身份和场景深度顺序保持稳定。\n4. 若同时启用循环规则，让视点沿小幅闭合路径回到相同位置、方向和速度；若画面没有可靠层次，应改用静态微动或缓慢推进。"
+}

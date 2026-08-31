@@ -1,0 +1,49 @@
+{
+  "id": "seamless_loop",
+  "title_zh": "无缝循环",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "continuity",
+  "source": "Project loop heuristic aligned with MiniMax-H3 natural-language temporal guidance",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "experimental",
+  "features": ["closed_observable_state", "periodic_motion", "single_shot_default", "velocity_continuity"],
+  "conflicts": ["storyboard_reference_map", "slow_push_in"],
+  "semantic_contract": {
+    "purpose": "让片尾的可观察状态、运动方向和速度自然回到片头，形成可重复播放的闭环。",
+    "adds": [
+      {"path": "timeline.loop.primary", "value": "closed_visual_motion_and_light_state"}
+    ],
+    "preserves": [
+      "subject.identity",
+      "subject.object_count",
+      "scene.composition",
+      "camera.position_and_orientation_at_seam",
+      "lighting.phase_at_seam",
+      "motion.velocity_at_seam"
+    ],
+    "forbids": [
+      "new_object_or_identity_change_at_seam",
+      "camera_or_composition_jump_at_seam",
+      "light_flash_or_color_phase_jump_at_seam",
+      "velocity_reset_or_direction_flip_at_seam",
+      "loop_claim_without_compatible_end_state"
+    ],
+    "defaults": [
+      {"path": "timeline.layout.primary", "value": "single_shot_when_unspecified"},
+      {"path": "motion.pattern", "value": "one_observable_periodic_cycle"}
+    ]
+  },
+  "ownership": {
+    "reads": ["subject.start_state", "camera.motion.primary", "scene.composition", "lighting.phase"],
+    "writes": ["timeline.loop.primary"],
+    "augments": ["continuity.end_to_start", "motion.velocity_continuity", "lighting.phase_continuity"]
+  },
+  "resolution": {
+    "exclusive_group": "timeline.loop.primary",
+    "priority": 55,
+    "requires": [],
+    "conflicts": ["storyboard_reference_map", "slow_push_in"]
+  },
+  "instructions": "无缝循环规则：用可观察的片头与片尾状态定义闭环，不依赖“无缝”一词本身。\n1. 选择一个适合周期重复的主体或环境运动，例如呼吸、摆动、旋转、水波、粒子轨迹或闭合视点路径；写清初始姿势、构图、机位、光照相位、方向和速度。\n2. 片尾让主体姿势、物体数量、机位与构图、光照相位、运动方向和速度自然回到同一状态；接缝两侧不能速度归零、突然反向、闪光或新增物体。\n3. 未另行指定时间结构时采用单镜无切；已有可闭合主运镜时保留并让其回到起点。单向缓慢推进和多分镜映射与本规则冲突。\n4. 只有实际提供兼容首尾锚点时才把首尾画面视为强对齐条件；其它情况只声明循环目标，不声称像素级闭合。"
+}

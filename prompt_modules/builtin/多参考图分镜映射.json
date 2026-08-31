@@ -1,0 +1,43 @@
+{
+  "id": "storyboard_reference_map",
+  "title_zh": "多参考图分镜映射",
+  "version": 3,
+  "scope": "Ref2VA",
+  "category": "timeline",
+  "source": "MiniMax-H3 official Subject/Picture reference semantics",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing",
+  "evidence_level": "official_aligned",
+  "features": ["multi_reference", "storyboard", "subject_picture_separation", "shot_mapping"],
+  "conflicts": ["single_shot_continuity", "seamless_loop", "live_wallpaper"],
+  "semantic_contract": {
+    "purpose": "把已连接的多张参考图分配给多镜头计划，并保持物理素材标签与逻辑主体身份分离。",
+    "adds": [
+      {"path": "timeline.layout.primary", "value": "multi_shot_reference_map"},
+      {"path": "shot_plan.reference_mapping", "value": "connected_media_to_planned_shots"}
+    ],
+    "preserves": [
+      "media.connected_label_identity",
+      "subject.identity_across_shots",
+      "user.reference_roles"
+    ],
+    "forbids": [
+      "invent_unconnected_subject_or_picture_labels",
+      "treat_picture_order_as_automatic_timeline",
+      "conflate_subject_identity_with_single_picture_composition",
+      "contradictory_reference_roles"
+    ],
+    "defaults": []
+  },
+  "ownership": {
+    "reads": ["media.references"],
+    "writes": ["shot_plan.reference_mapping", "timeline.layout.primary"],
+    "augments": ["subject.reference_bindings"]
+  },
+  "resolution": {
+    "exclusive_group": "timeline.layout.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": ["single_shot_continuity", "seamless_loop", "live_wallpaper"]
+  },
+  "instructions": "Ref2VA 多参考图分镜映射规则：用于确实需要多个镜头、且不同参考素材承担不同镜头或主体职责的任务。\n1. 只根据当前素材清单建立映射：Picture 是实际连接图片的物理标签；Subject 是最终提示词中可跨镜复用的逻辑人物、物体或场景身份。不得把两套编号当成同一编号体系。\n2. 先读取用户给每张参考图指定的用途，再把它分配为身份证据、细节证据或某镜头的构图/姿势锚点；参考图连接顺序本身不等于时间线。\n3. 每个计划镜头只引用完成该镜头所需的素材，避免同一张图同时承担互相矛盾的身份与构图职责，也不要逐镜复述全部参考图。\n4. 同一主体跨镜保持身份稳定；多主体写清各自位置、动作与互动，不能因外观相似而合并编号。\n5. 不引用未连接标签，不猜测看不见的素材内容；如果任务要求一镜到底，应改用单镜连续性规则。"
+}

@@ -1,0 +1,50 @@
+{
+  "id": "scene_coop_game_intro",
+  "title_zh": "合作游戏开场动画",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: co-op-game-intro-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/co-op-game-intro-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["two_player_identity", "game_menu_intro", "ui_event_timing", "visible_text"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "把两名角色、玩家信息与一个主菜单状态组织成可读的合作游戏开场事件链。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "two_player_game_intro"},
+      {"path": "ui.event_sequence", "value": "players_arrive_title_reveals_primary_control_responds"}
+    ],
+    "preserves": [
+      "subject.player_1_identity",
+      "subject.player_2_identity",
+      "visible_text.verbatim",
+      "ui.layout_and_layer_order",
+      "camera.motion.primary",
+      "visual.medium.primary"
+    ],
+    "forbids": [
+      "player_identity_or_name_swap",
+      "invented_game_title_or_button_copy",
+      "random_ui_relayout",
+      "text_covering_key_faces",
+      "playable_logic_or_multi_page_interface_claim"
+    ],
+    "defaults": [
+      {"path": "ui.state_count", "value": 1},
+      {"path": "ui.copy_density", "value": "title_primary_control_and_few_icons"}
+    ]
+  },
+  "ownership": {
+    "reads": ["subject.player_1_identity", "subject.player_2_identity", "visible_text.user_copy", "user.visual_style"],
+    "writes": ["scene.recipe.primary"],
+    "augments": ["ui.event_sequence", "ui.layout_and_layer_order", "audio.ui_feedback"]
+  },
+  "resolution": {
+    "exclusive_group": "scene.recipe.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "双人合作游戏开场配方：只呈现两名角色和一个清楚的主菜单状态。\n1. 将两名角色分别绑定到稳定的身份、配色、名字、玩家卡和屏幕区域；参考图只提供身份锚点时，可按用户指定画风重绘，但不能交换脸、名字、服装或左右归属。\n2. 用一个短事件链推进，例如两人集结 → 游戏标题显现 → 主按钮或少量图标响应；角色动作、标题和界面反馈按同一节拍发生。\n3. 界面仅保留当前镜头可读的标题、玩家信息、主按钮和少量图标，文字全部来自用户输入；写清人物、标题、按钮的前后层级，避免遮脸与随机重排。\n4. 沿用用户画风和其它规则的主运镜，不扩展为多页界面、真实可玩逻辑，也不补造游戏名、按钮文案或品牌标志。"
+}

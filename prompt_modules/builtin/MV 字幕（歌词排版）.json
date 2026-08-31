@@ -1,0 +1,50 @@
+{
+  "id": "scene_mv_subtitle",
+  "title_zh": "MV 字幕（歌词排版）",
+  "version": 3,
+  "scope": "T2VA,I2VA,FL2VA,L2VA,Ref2VA",
+  "category": "scene_recipe",
+  "source": "官方 Skill 改编: music-video-subtitle-generator",
+  "source_url": "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/music-video-subtitle-generator",
+  "evidence_level": "official_skill_adaptation",
+  "features": ["lyric_verbatim", "beat_reactive_typography", "vocal_timing", "reference_role_separation"],
+  "conflicts": [],
+  "semantic_contract": {
+    "purpose": "把当前短片中的歌词、演唱、画面节拍和空间排版对齐，同时逐字保留用户文字。",
+    "adds": [
+      {"path": "scene.recipe.primary", "value": "music_video_with_spatial_lyric_typography"},
+      {"path": "visible_text.presentation", "value": "beat_reactive_spatial_lyric_typography"}
+    ],
+    "preserves": [
+      "visible_text.verbatim",
+      "visible_text.original_language",
+      "audio.vocal_timing",
+      "subject.identity",
+      "camera.motion.primary",
+      "visual.medium.primary"
+    ],
+    "forbids": [
+      "invented_or_rewritten_lyrics",
+      "character_scene_and_text_reference_role_confusion",
+      "typography_covering_key_face_or_action",
+      "unsupported_beat_precision_without_audio_reference",
+      "forced_subtitles_without_user_text_requirement"
+    ],
+    "defaults": [
+      {"path": "visible_text.policy", "value": "show_only_current_short_phrase"},
+      {"path": "visible_text.motion", "value": "respond_to_vocal_or_visual_beat"}
+    ]
+  },
+  "ownership": {
+    "reads": ["visible_text.user_lyrics", "audio.reference", "subject.identity", "scene.environment"],
+    "writes": ["scene.recipe.primary"],
+    "augments": ["visible_text.presentation", "audio.visual_alignment", "shot.beat_structure"]
+  },
+  "resolution": {
+    "exclusive_group": "scene.recipe.primary",
+    "priority": 60,
+    "requires": [],
+    "conflicts": []
+  },
+  "instructions": "MV 字幕与歌词排版配方：只处理当前短片时长内的歌词、演唱、画面节拍与空间文字。\n1. 用户歌词逐字保留原语言，不改写、不补句；每个时间段只呈现当前可唱或可读的短语，并把文字出现、停留、离场与真实演唱或明确画面节拍对应。\n2. 分开理解角色、场景和文字参考：人物参考锁身份，场景参考锁环境，文字只采用用户给定内容，不能把参考图中的随机字当歌词。\n3. 写清字号层级、画面位置、空间依附、进出方式和可读时长；排版可随节拍位移、缩放或显隐，但不能遮挡关键面部、口型和动作。\n4. 沿用用户指定的音乐与画风，不默认混合风格。没有歌词需求时不强加字幕；没有音频参考时只做相对节拍设计，不声称逐拍精确同步。"
+}
