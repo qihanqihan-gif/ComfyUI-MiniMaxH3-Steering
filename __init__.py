@@ -114,7 +114,7 @@ def _register_api_routes():
     async def _module_files(request):
         """前端「刷新模块列表」按钮：返回 prompt_modules/ 根 + 用户库的 JSON 清单。
         body: {"folder": "nsfw"}（可选）；返回 {"folder", "files", "all_folders"}。"""
-        import prompt_modules as _pm
+        from . import prompt_modules as _pm
         try:
             body = await request.json()
         except (json.JSONDecodeError, web.HTTPBadRequest):
