@@ -186,10 +186,79 @@ def normalize_prompt_ir(prompt_ir, task_type: str | None = None,
     return normalized
 
 
+def _safe_normalize_ir_structure(normalized: dict,
+                                 media_inventory: dict[str, int] | None = None
+                                 ) -> tuple[dict, list[str]]:
+    """只修复不需要猜测语义的 IR 编号问题。"""
+    result = dict(normalized)
+    notes: list[str] = []
+    task = result["task_type"]
+    shot_field = "detailed_description" if task == "Ref2VA" else "integrated_multimodal_description"
+    shot_text = str(result.get(shot_field) or "")
+    shot_numbers = [int(value) for value in re.findall(
+        r"\[Shot\s+(\d+)\]", shot_text, re.IGNORECASE,
+    )]
+    if (
+        shot_numbers
+        and len(set(shot_numbers)) == len(shot_numbers)
+        and shot_numbers == list(range(shot_numbers[0], shot_numbers[0] + len(shot_numbers)))
+        and shot_numbers[0] != 1
+    ):
+        offset = shot_numbers[0] - 1
+
+        def replace_shot(match):
+            return f"[Shot {int(match.group(1)) - offset}]"
+
+        result[shot_field] = re.sub(
+            r"\[Shot\s+(\d+)\]", replace_shot, shot_text, flags=re.IGNORECASE,
+        )
+        notes.append(
+            f"镜头标签按出现顺序从 {shot_numbers[0]}..{shot_numbers[-1]} 规范为 1..{len(shot_numbers)}"
+        )
+        if task != "Ref2VA":
+            result["final_shot_number"] = len(shot_numbers)
+            result["alignment_line"] = build_alignment_line(
+                task, result["duration_seconds"], len(shot_numbers),
+            )
+
+    inventory = {
+        str(kind).casefold(): max(0, int(count))
+        for kind, count in (media_inventory or {}).items()
+    }
+    if inventory.get("picture") == 1:
+        content_fields = _SIX_FIELDS if task == "Ref2VA" else _THREE_FIELDS
+        picture_numbers = sorted({
+            int(number)
+            for field in content_fields
+            for value in (str(result.get(field) or ""),)
+            for kind, number in _LABEL_RE.findall(value)
+            if kind.casefold() == "picture"
+        })
+        if len(picture_numbers) == 1 and picture_numbers[0] != 1:
+            old_number = picture_numbers[0]
+
+            def replace_picture(match):
+                if match.group(1).casefold() == "picture" and int(match.group(2)) == old_number:
+                    return "<Picture 1>"
+                return match.group(0)
+
+            for field, value in list(result.items()):
+                if isinstance(value, str):
+                    result[field] = _LABEL_RE.sub(replace_picture, value)
+            notes.append(
+                f"本次仅有一个 Picture 素材，已把唯一的 <Picture {old_number}> 规范为 <Picture 1>"
+            )
+    return result, notes
+
+
 def compile_prompt_ir(prompt_ir, task_type: str | None = None,
-                      duration: float | None = None) -> dict:
+                      duration: float | None = None,
+                      media_inventory: dict[str, int] | None = None) -> dict:
     """IR -> 官方 H3 Prompt，并立即执行确定性校验。"""
     normalized = normalize_prompt_ir(prompt_ir, task_type=task_type, duration=duration)
+    normalized, normalizations = _safe_normalize_ir_structure(
+        normalized, media_inventory=media_inventory,
+    )
     task = normalized["task_type"]
     if task == "Ref2VA":
         prompt = serialize_six_part(
@@ -207,9 +276,14 @@ def compile_prompt_ir(prompt_ir, task_type: str | None = None,
         mode = "base"
     validation = validate_prompt(
         prompt, duration=normalized["duration_seconds"], mode=mode, check_fields=True,
-        task_type=task,
+        task_type=task, media_inventory=media_inventory,
     )
-    return {"prompt": prompt, "ir": normalized, "validation": validation}
+    return {
+        "prompt": prompt,
+        "ir": normalized,
+        "validation": validation,
+        "normalizations": normalizations,
+    }
 
 
 def _field_order(text: str, fields) -> list[str]:
@@ -254,7 +328,8 @@ def _consecutive_numbers(nums: list[int]) -> list[str]:
 
 
 def validate_prompt(text: str, duration: float | None = None, mode: str | None = None,
-                    check_fields: bool = True, task_type: str | None = None) -> dict:
+                    check_fields: bool = True, task_type: str | None = None,
+                    media_inventory: dict[str, int] | None = None) -> dict:
     """确定性校验最终提示词。
 
     返回 {"errors": [...], "warnings": [...], "checks": {...}}。
@@ -340,6 +415,26 @@ def validate_prompt(text: str, duration: float | None = None, mode: str | None =
                 errors.append(
                     f"{task} 官方 ImageToVideo 最多提供 {expected_pictures} 个 Picture 锚点，"
                     f"提示词却使用了 {overflow}；多参考素材应改用 Ref2VA"
+                )
+
+    # 导演调用可提供本次已连接/由用户明确声明的媒体数量；通用编译节点未知时跳过。
+    if media_inventory is not None:
+        inventory = {
+            str(kind).casefold(): max(0, int(count))
+            for kind, count in media_inventory.items()
+        }
+        for kind in ("picture", "video", "audio"):
+            if kind not in inventory:
+                continue
+            allowed = inventory[kind]
+            used = sorted(set(labels.get(kind, [])))
+            overflow = [number for number in used if number > allowed]
+            if overflow:
+                display = kind.capitalize()
+                available = f"1..{allowed}" if allowed else "无"
+                errors.append(
+                    f"<{display}> 使用了本次媒体清单外的编号 {overflow}；"
+                    f"可用 {display} 编号为 {available}"
                 )
 
     # Ref2VA：所有正文引用都应先在 subject_definitions 中定义。

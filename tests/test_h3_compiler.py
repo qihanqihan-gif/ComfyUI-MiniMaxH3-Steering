@@ -367,6 +367,78 @@ def test_compile_ref_ir_preserves_all_six_sections():
     assert result["validation"]["errors"] == []
 
 
+def test_compile_safely_restarts_consecutive_shots_at_one():
+    mod = _load_mod()
+    source = {
+        "subject_definitions": "<Subject 1> is defined by <Picture 1>.",
+        "summary": "[character replacement] Replace the performer.",
+        "retention_analysis": "<Picture 1>: identity reference.",
+        "detailed_description": (
+            "[Shot 2] Opening action. "
+            "[Shot 3] At 00:02.500, the action continues."
+        ),
+        "overall_soundscape": "Room tone.",
+        "non_diegetic_music": "N/A",
+    }
+    result = mod.compile_prompt_ir(
+        source, task_type="Ref2VA", duration=5.0,
+        media_inventory={"picture": 1, "video": 0, "audio": 0},
+    )
+    assert "[Shot 1] Opening action" in result["prompt"]
+    assert "[Shot 2] At 00:02.500" in result["prompt"]
+    assert result["validation"]["errors"] == []
+    assert any("规范为 1..2" in note for note in result["normalizations"])
+
+
+def test_compile_safely_maps_only_picture_anchor_to_connected_picture_one():
+    mod = _load_mod()
+    result = mod.compile_prompt_ir({
+        "integrated_multimodal_description": "[Shot 1] Animate <Picture 2>.",
+        "overall_soundscape": "N/A",
+        "non_diegetic_music": "N/A",
+    }, task_type="I2VA", duration=5.0,
+       media_inventory={"picture": 1, "video": 0, "audio": 0})
+    assert "Animate <Picture 1>" in result["prompt"]
+    assert "<Picture 2>" not in result["prompt"]
+    assert result["validation"]["errors"] == []
+    assert any("唯一的 <Picture 2>" in note for note in result["normalizations"])
+
+
+def test_media_inventory_rejects_hallucinated_audio_label():
+    mod = _load_mod()
+    source = {
+        "subject_definitions": "<Subject 1> uses <Picture 1>. <Video 1> is the source.",
+        "summary": "[character replacement] Replace the performer.",
+        "retention_analysis": "<Picture 1>: identity. <Video 1>: motion.",
+        "detailed_description": "[Shot 1] Follow <Video 1> while <Audio 1> plays.",
+        "overall_soundscape": "N/A",
+        "non_diegetic_music": "N/A",
+    }
+    result = mod.compile_prompt_ir(
+        source, task_type="Ref2VA", duration=5.0,
+        media_inventory={"picture": 1, "video": 1, "audio": 0},
+    )
+    assert any("<Audio>" in error and "媒体清单外" in error
+               for error in result["validation"]["errors"])
+
+
+def test_media_inventory_allows_reusing_same_picture_across_fields():
+    mod = _load_mod()
+    source = {
+        "subject_definitions": "<Subject 1> uses <Picture 1>.",
+        "summary": "[reference generation] Use <Picture 1>.",
+        "retention_analysis": "<Picture 1>: identity reference.",
+        "detailed_description": "[Shot 1] <Subject 1> from <Picture 1> waves.",
+        "overall_soundscape": "N/A",
+        "non_diegetic_music": "N/A",
+    }
+    result = mod.compile_prompt_ir(
+        source, task_type="Ref2VA", duration=5.0,
+        media_inventory={"picture": 1, "video": 0, "audio": 0},
+    )
+    assert result["validation"]["errors"] == []
+
+
 def test_validate_auto_mode_checks_base_order_not_six_field_order():
     mod = _load_mod()
     text = (

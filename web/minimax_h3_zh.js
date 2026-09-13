@@ -23,10 +23,11 @@ const NODE_TRANSLATIONS = {
       json_mode: "JSON 模式",
       analysis_mode: "视觉分析模式",
       model_profile: "多模态模型兼容配置",
-      frame_sequence_limit: "API 最多发送序列帧数",
-      frame_selection_mode: "序列帧快捷选择方式",
-      frame_selection_spec: "自定义帧序号 / 百分比",
+      frame_sequence_limit: "直连视频帧上限",
+      frame_selection_mode: "直连视频选帧",
+      frame_selection_spec: "直连自定义选帧",
       api_failure_policy: "API / JSON 失败策略",
+      reference_fidelity: "参考视频跟随档",
       ref_image_1: "导演识图素材 1（不传给 H3）",
       ref_image_2: "导演识图素材 2（不传给 H3）",
       ref_image_3: "导演识图素材 3（不传给 H3）",
@@ -37,7 +38,7 @@ const NODE_TRANSLATIONS = {
       ref_image_8: "导演识图素材 8（不传给 H3）",
       ref_image_9: "导演识图素材 9（不传给 H3）",
       video_frame_sequence: "参考视频抽帧 / 图像序列（批次，仅供 API）",
-      video_timeline_manifest: "视频时间线 manifest（接视频时间线上下文）",
+      video_timeline_manifest: "参考视频时间线（可选）",
       system_module: "创作规则（接规则组合节点）",
       module_manifest: "规则解析清单（接规则组合节点第 4 输出）",
       enhanced_prompt: "增强后提示词（接官方节点 prompt）",
@@ -109,6 +110,12 @@ const NODE_TRANSLATIONS = {
         stop: "停止工作流（默认，防止原提示词误直通）",
         passthrough: "直通原提示词（旧行为）",
       },
+      reference_fidelity: {
+        auto: "自动（Ref2VA 视频按结构跟随）",
+        locked: "锁定跟随（动作 / 姿势 / 镜头 / 时点）",
+        structural: "结构跟随（主要阶段与切镜）",
+        loose: "松散参考（允许重新编排）",
+      },
     },
   },
   MiniMaxH3CloudDirector: {
@@ -131,9 +138,10 @@ const NODE_TRANSLATIONS = {
       timeout_s: "单次调用超时（秒）",
       api_reasoning: "思考强度（由云端预设转译）",
       analysis_mode: "参考图与视频帧的上传方式",
-      frame_sequence_limit: "参考视频最多上传帧数",
-      frame_selection_mode: "参考视频选帧方式",
-      frame_selection_spec: "自定义帧序号 / 百分比",
+      frame_sequence_limit: "直连视频帧上限",
+      frame_selection_mode: "直连视频选帧",
+      frame_selection_spec: "直连自定义选帧",
+      reference_fidelity: "参考视频跟随档",
       ref_image_1: "参考图 1（按连接顺序编号；仅供 API）",
       ref_image_2: "参考图 2（按连接顺序编号；仅供 API）",
       ref_image_3: "参考图 3（按连接顺序编号；仅供 API）",
@@ -146,7 +154,7 @@ const NODE_TRANSLATIONS = {
       video_frame_sequence: "参考视频帧 / 图像序列（同一 <Video 1> 时间线；仅供 API）",
       cloud_video: "Gemini 原生视频（与视频帧二选一；仅供 API）",
       comfy_video: "Comfy 原生 VIDEO（未裁剪文件；与上两路二选一）",
-      video_timeline_manifest: "视频时间线 manifest（可选；接视频时间线上下文）",
+      video_timeline_manifest: "参考视频时间线（可选）",
       system_module: "创作规则（接规则组合节点）",
       module_manifest: "规则解析清单（接规则组合节点第 4 输出）",
       enhanced_prompt: "增强后提示词（接官方节点 prompt）",
@@ -203,6 +211,12 @@ const NODE_TRANSLATIONS = {
         custom_indices: "自定义帧序号（支持 -1=最后一帧）",
         custom_percent: "自定义百分比（0–100）",
       },
+      reference_fidelity: {
+        auto: "自动（Ref2VA 视频按结构跟随）",
+        locked: "锁定跟随（动作 / 姿势 / 镜头 / 时点）",
+        structural: "结构跟随（主要阶段与切镜）",
+        loose: "松散参考（允许重新编排）",
+      },
     },
   },
   MiniMaxH3CloudVideoInput: {
@@ -237,16 +251,16 @@ const NODE_TRANSLATIONS = {
     },
   },
   MiniMaxH3VideoContext: {
-    title: "MiniMax H3 视频时间线上下文",
+    title: "MiniMax H3 参考视频准备",
     fields: {
-      video_frame_sequence: "参考视频帧 / 图像序列（按时间顺序的 IMAGE 批次）",
-      fps: "源视频帧率（官方参考视频按 24 FPS 解释）",
-      duration_seconds: "时长（秒；0=由总帧数/fps 推导）",
-      frame_sequence_limit: "最多选取帧数（0=全部保留）",
-      frame_selection_mode: "选帧方式",
-      shot_boundaries: "切镜点（秒或百分比，如 0,2.5,5 或 0%,50%,100%）",
-      selected_frames: "所选帧批次（接导演节点的参考视频帧输入）",
-      timeline_manifest: "时间线 manifest（JSON：帧时间码/切镜分段/相对位置）",
+      video_frame_sequence: "参考视频帧（按时间顺序）",
+      fps: "源帧率（FPS）",
+      duration_seconds: "参考片段时长（0=自动）",
+      frame_sequence_limit: "代表帧数（0=全部）",
+      frame_selection_mode: "代表帧分布",
+      shot_boundaries: "真实切镜点（可选）",
+      selected_frames: "代表帧（接导演参考视频帧）",
+      timeline_manifest: "参考视频时间线（接导演同名接口）",
       report: "构建报告",
     },
     options: {
@@ -861,13 +875,13 @@ function nodeCloudCredentialConfig(node) {
 }
 
 const CLOUD_WIDGET_SCHEMA_PROP = "minimax_h3_cloud_widget_schema"
-const CLOUD_WIDGET_SCHEMA_VERSION = 4
+const CLOUD_WIDGET_SCHEMA_VERSION = 5
 const CLOUD_WIDGET_NAMES = [
   "prompt", "task_type", "duration_seconds", "shot_count", "rewrite_mode",
   "output_language", "cloud_provider", "api_model", "temperature", "max_tokens",
   "timeout_s", "api_reasoning", "analysis_mode", "frame_sequence_limit",
   "frame_selection_mode", "frame_selection_spec", "cloud_base_url", "my_preset",
-  "gemini_video_route", "gemini_video_fps",
+  "gemini_video_route", "gemini_video_fps", "reference_fidelity",
 ]
 
 function normalizeCloudDirectorWidgetValues(rawValues, declaredVersion = 0) {
@@ -899,6 +913,7 @@ function repairCloudDirectorWidgetValues(node, info) {
     api_reasoning: "auto", analysis_mode: "auto", frame_sequence_limit: 48,
     frame_selection_mode: "uniform_full", frame_selection_spec: "",
     cloud_base_url: "", my_preset: "", gemini_video_route: "auto", gemini_video_fps: 0,
+    reference_fidelity: "auto",
   }
   const allowed = {
     task_type: new Set(["T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"]),
@@ -907,6 +922,7 @@ function repairCloudDirectorWidgetValues(node, info) {
     api_reasoning: new Set(["auto", "off", "on"]),
     analysis_mode: new Set(["auto", "single", "staged"]),
     gemini_video_route: new Set(["auto", "inline", "file_api"]),
+    reference_fidelity: new Set(["auto", "locked", "structural", "loose"]),
     frame_selection_mode: new Set(["uniform_full", "uniform_no_edges", "custom_indices", "custom_percent"]),
   }
   const byName = Object.fromEntries(CLOUD_WIDGET_NAMES.map((name, index) => [name, values[index]]))
@@ -942,6 +958,8 @@ function repairCloudDirectorWidgetValues(node, info) {
     gemini_video_route: allowed.gemini_video_route.has(byName.gemini_video_route)
       ? byName.gemini_video_route : defaults.gemini_video_route,
     gemini_video_fps: finite("gemini_video_fps", 0, 24),
+    reference_fidelity: allowed.reference_fidelity.has(byName.reference_fidelity)
+      ? byName.reference_fidelity : defaults.reference_fidelity,
   }
   if (normalized.cloud_provider !== "custom") {
     normalized.cloud_base_url = ""
@@ -1679,6 +1697,82 @@ function isDirectorInputConnected(input) {
   return input?.link !== null && input?.link !== undefined
 }
 
+const DIRECTOR_FRAME_WIDGETS = [
+  "frame_sequence_limit", "frame_selection_mode", "frame_selection_spec",
+]
+
+function refreshDirectorTimelineAuthority(node) {
+  if (!node) return
+  const timelineInput = (node.inputs ?? []).find((item) => item?.name === "video_timeline_manifest")
+  const controlled = isDirectorInputConnected(timelineInput)
+  const directLabels = {
+    frame_sequence_limit: "直连视频帧上限",
+    frame_selection_mode: "直连视频选帧",
+    frame_selection_spec: "直连自定义选帧",
+  }
+  const timelineLabels = {
+    frame_sequence_limit: "代表帧数【由上游时间线控制】",
+    frame_selection_mode: "选帧方式【由上游时间线控制】",
+    frame_selection_spec: "自定义选帧【由上游时间线控制】",
+  }
+  for (const name of DIRECTOR_FRAME_WIDGETS) {
+    const widget = (node.widgets ?? []).find((item) => item?.name === name)
+    if (!widget) continue
+    widget.label = (controlled ? timelineLabels : directLabels)[name]
+    widget.disabled = controlled
+  }
+  node.setDirtyCanvas?.(true, true)
+}
+
+function installDirectorTimelineAuthority(nodeType) {
+  if (nodeType.prototype.__minimaxH3TimelineAuthorityInstalled) return
+  nodeType.prototype.__minimaxH3TimelineAuthorityInstalled = true
+  const refreshSoon = (node) => queueMicrotask(() => refreshDirectorTimelineAuthority(node))
+  const originalOnNodeCreated = nodeType.prototype.onNodeCreated
+  nodeType.prototype.onNodeCreated = function () {
+    const result = originalOnNodeCreated?.apply(this, arguments)
+    refreshSoon(this)
+    return result
+  }
+  const originalOnConfigure = nodeType.prototype.onConfigure
+  nodeType.prototype.onConfigure = function () {
+    const result = originalOnConfigure?.apply(this, arguments)
+    refreshSoon(this)
+    return result
+  }
+  const originalOnConnectionsChange = nodeType.prototype.onConnectionsChange
+  nodeType.prototype.onConnectionsChange = function () {
+    const result = originalOnConnectionsChange?.apply(this, arguments)
+    refreshSoon(this)
+    return result
+  }
+}
+
+function installVideoContextHelpButton(nodeType) {
+  if (nodeType.prototype.__minimaxH3VideoContextHelpInstalled) return
+  nodeType.prototype.__minimaxH3VideoContextHelpInstalled = true
+  const originalOnNodeCreated = nodeType.prototype.onNodeCreated
+  nodeType.prototype.onNodeCreated = function () {
+    const result = originalOnNodeCreated?.apply(this, arguments)
+    const button = this.addWidget("button", "ℹ 接线与片段范围说明", null, () => {
+      alert([
+        "这个节点准备一段参考视频，保留代表帧对应的真实时间；它不会调用模型。",
+        "",
+        "接线：视频加载节点的 IMAGE → 本节点“参考视频帧”；本节点两个输出分别 → 导演的“参考视频帧”和“参考视频时间线”。",
+        "",
+        "片段范围由上游视频加载 / 裁剪节点决定。本节点不会裁掉视频；例如 24 FPS 下输入 360 帧，就是 15 秒参考片段。",
+        "",
+        "常用时只需确认源帧率，参考片段时长保持 0，代表帧数保持 48，分布选“均匀覆盖完整时间线”。真实切镜点可以留空。",
+        "",
+        "连接时间线后，导演里的三个直连选帧设置会标为由上游控制，避免重复选帧。",
+      ].join("\n"))
+    }, { serialize: false })
+    button.serialize = false
+    button.serializeValue = () => undefined
+    return result
+  }
+}
+
 function directorInputSourceLabel(node, input) {
   const links = node?.graph?.links
   const link = links?.[input?.link] ?? links?.get?.(input?.link)
@@ -1982,12 +2076,12 @@ function installCloudCredentialButton(nodeType) {
     const mediaHelp = node.addWidget("button", "ℹ 参考图 / 视频如何发送", null, () => {
       alert([
         "参考图：按实际连接顺序编号为 <Picture 1>、<Picture 2>……，只发送给提示词 API。",
-        "参考视频帧：整个 IMAGE 批次都属于同一个 <Video 1> 的按时间排列帧；节点按“最多上传帧数”和“选帧方式”取样。",
+        "参考视频帧：整个 IMAGE 批次都属于同一个 <Video 1> 的按时间排列帧。直连时由导演的三个选帧设置取样；若同时连接“参考视频准备”的时间线，则以上游代表帧为准。",
         "DeepSeek 600 帧：仅作为官方 DeepSeek 的边界实验档。节点会优先缩图压缩并在报告中给出请求/实际帧数、payload、prompt token 与网络耗时；其他连接仍自动收敛到 300。",
         "Gemini 原生视频：可用“云端原生视频输入”连接 cloud_video，也可把 Comfy 核心 Load Video 的未裁剪文件型 VIDEO 直接接入 comfy_video。auto 会核算视频 Base64 与参考图的联合体积，超预算时走 Files API；远端临时文件在生成调用后自动删除。原生视频与 IMAGE 帧批次必须二选一，便于做可信 A/B。",
         "自动 / 联合上传：参考图与所选视频帧放进同一次多模态请求，便于模型同时理解目标身份和动作时间线。",
         "分阶段上传：先分别分析参考图与视频时间线，再汇总生成 Prompt IR；主要用于 A/B 或单次联合请求不稳定时。",
-        "时间线 manifest：可把“视频时间线上下文”的 JSON 输出接入云端导演，让二次选帧仍保留真实源帧索引、时间码和切镜分段；不会在节点内生成数百张预览。",
+        "参考视频时间线：把“参考视频准备”的两个输出成对接入导演，可保留真实源帧索引、时间码和切镜分段。此时导演不会再做第二套人工选帧。",
         "重要：以上素材只供云端 API 识别，不会自动传给 MiniMax H3；生成节点仍需另行连接对应图片、视频和音频。",
       ].join("\n\n"))
     }, { serialize: false })
@@ -2069,10 +2163,15 @@ app.registerExtension({
     if (nodeData.name === "MiniMaxH3PromptDirector") {
       installModelRefreshButton(nodeType)
       installDirectorMediaReferenceButton(nodeType)
+      installDirectorTimelineAuthority(nodeType)
     }
     if (nodeData.name === "MiniMaxH3CloudDirector") {
       installCloudCredentialButton(nodeType)
       installDirectorMediaReferenceButton(nodeType)
+      installDirectorTimelineAuthority(nodeType)
+    }
+    if (nodeData.name === "MiniMaxH3VideoContext" && isChineseLocale()) {
+      installVideoContextHelpButton(nodeType)
     }
     if (!isChineseLocale()) return
     const config = NODE_TRANSLATIONS[nodeData.name]

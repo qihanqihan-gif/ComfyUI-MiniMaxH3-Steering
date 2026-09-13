@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+### Added
+
+- 公开 Ref2VA 研究模板加入云端导演主路径、结构化规则文件直载、视频时间线上下文、Gemini 原生视频入口和分区注释。
+
+### Changed
+
+- 公开模板默认使用 `balanced`、`reference_fidelity=auto` 与失败即停止的 IR 编译校验；本地导演保留为按注释替换的可选路径，避免画布堆叠两个巨大节点。
+
+### Fixed
+
+- 旧工作流缺少 `reference_fidelity` 时由后端安全回退为 `auto`；I2VA 等任务的 Picture 数量超限会在图片编码和提示词 API 调用前给出针对性错误。
+
 ## 0.3.0-alpha.1 - 2026-09-01
 
 ### Fixed

@@ -295,6 +295,10 @@ def test_frontend_key_widget_is_non_serialized_and_does_not_use_browser_storage(
     assert "/minimaxh3lab/cloud/presets" in source
     assert "createCloudPresetManager" in source
     assert "normalizeCloudDirectorWidgetValues" in source
+    assert "const CLOUD_WIDGET_SCHEMA_VERSION = 5" in source
+    assert '"gemini_video_route", "gemini_video_fps", "reference_fidelity"' in source
+    assert 'reference_fidelity: "auto"' in source
+    assert "锁定跟随（动作 / 姿势 / 镜头 / 时点）" in source
     assert 'byName.cloud_provider === "my_presets"' in source
     assert "使用已保存连接" in source
     assert "仅临时用于当前节点" in source

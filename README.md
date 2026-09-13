@@ -36,8 +36,8 @@ Steering 允许在不修改任何权重文件的前提下，对 MiniMax-H3 文�
 | **MiniMaxH3Steering** | ★ 主打节点：加载时方向操控。用 `tools/measure_directions.py` 自产方向向量，在文本编码器指定层（默认 40-49）的 o_proj 输出上做 `h -= λ·(h·d)·d` 投影移除。支持双方向（refusal / safety）+ 任意层区间 + 自定义 npy |
 | MiniMaxH3OpenCache | 50 层 DiT 全层残差缓存（走官方 `double_block` 替换 hook），跳过未变化块的模型计算 |
 | MiniMaxH3EasyCacheSafe | 官方 EasyCache 的鲁棒封装（多模型 key、跨图安全、异常直通） |
-| MiniMaxH3PromptDirector | 顺序接口提示词导演：9 个独立参考图接口 + 1 个参考视频抽帧/图像序列批次接口；自动模式会逐张分析参考图、联合分析有序视频帧，再合成 H3 Prompt IR。所有图片只发给提示词 API，必须另接 H3 官方节点；支持模块 manifest 追踪与接线诊断 |
-| **MiniMaxH3CloudDirector** | ★ 云端多模态导演：节点正面只暴露连接预设、媒体上传策略和生成预算，供应商 host、默认模型、thinking/wire/schema 由受控预设与 adapter 解析。DeepSeek 可做最高 600 帧边界实验；Gemini 支持抽帧与原生视频 A/B。Key 从环境变量或 ComfyUI 用户目录本地凭据文件读取，不进入工作流 |
+| MiniMaxH3PromptDirector | 顺序接口提示词导演：9 个独立参考图接口 + 1 个参考视频抽帧/图像序列批次接口；自动模式会逐张分析参考图、联合分析有序视频帧，再合成 H3 Prompt IR。所有图片只发给提示词 API，必须另接 H3 官方节点；支持参考视频跟随档、媒体清单校验、模块 manifest 追踪与接线诊断 |
+| **MiniMaxH3CloudDirector** | ★ 云端多模态导演：节点正面只暴露连接预设、媒体上传策略、参考视频跟随档和生成预算，供应商 host、默认模型、thinking/wire/schema 由受控预设与 adapter 解析。DeepSeek 可做最高 600 帧边界实验；Gemini 支持抽帧与原生视频 A/B。Key 从环境变量或 ComfyUI 用户目录本地凭据文件读取，不进入工作流 |
 | **MiniMaxH3CloudVideoInput** | Gemini 原生视频输入：选择 ComfyUI input 内的视频，以不透明运行时对象连接云端导演；不解码为数百张前端预览，不把绝对路径、视频字节或远端 URI写入普通节点输出 |
 | **MiniMaxH3CompileValidate** | ★ 离线 Prompt IR 编译与提示词校验：JSON 输入会编译成官方三段式/六段式，普通文本输入只校验不改写；输出最终提示词、报告、规范化 IR 与是否通过 |
 | **MiniMaxH3PromptModuleLoader** | ★ 创作规则组合节点（热加载）：26 个可选规则 + 自定义规则框；在调用 LLM 前确定性处理去重、作用域、依赖、冲突与互斥组。默认 `standard` 保持当前正文，另有 `compact/strong` 实验渲染档；manifest 记录 applied/suppressed、档位与可复现哈希（核心协议与作者参考资料不可选） |
@@ -49,22 +49,31 @@ Steering 允许在不修改任何权重文件的前提下，对 MiniMax-H3 文�
 
 ## 快速开始：提示词链
 
-推荐先只接最小链路，确认提示词输出正确后再加入缓存和 Steering：
+公开模板默认使用凭据不进入工作流的云端导演。推荐先只接最小链路，确认提示词输出正确后再加入缓存和
+Steering：
 
 ```text
-Input Text
-  ├─> MiniMaxH3PromptModuleLoader.system_prompt_module
-  ├─> MiniMaxH3PromptDirector.prompt
-  └─> MiniMaxH3PromptDirector.ref_image_1..9（仅供提示词 API 识图）
+MiniMaxH3ModuleFolderLoader.rule_pack（可选）
+  └─> MiniMaxH3PromptModuleLoader.external_rule_pack
+
+Input Text ────────────────────────────────> MiniMaxH3CloudDirector.prompt
+MiniMaxH3PromptModuleLoader.system_prompt_module ─> MiniMaxH3CloudDirector.system_module
+MiniMaxH3PromptModuleLoader.module_manifest ──────> MiniMaxH3CloudDirector.module_manifest
+参考图 ───────────────────────────────────> MiniMaxH3CloudDirector.ref_image_1..9（仅供提示词 API 识图）
 
 VHS_LoadVideo.IMAGE（完整帧 batch）
-  ├─> MiniMaxH3PromptDirector.video_frame_sequence（自动均匀取 4 帧，仅供 API）
+  ├─> MiniMaxH3VideoContext（可选；默认 48 张代表帧 + 真实时间线 manifest）
+  │      ├─> MiniMaxH3CloudDirector.video_frame_sequence
+  │      └─> MiniMaxH3CloudDirector.video_timeline_manifest
   └─> 官方 MiniMaxH3ReferenceToVideo.ref_video_0（仍需另接完整参考视频）
 
-PromptModuleLoader.module_manifest ─> PromptDirector.module_manifest
-PromptDirector.enhanced_prompt ─> MiniMaxH3CompileValidate
+MiniMaxH3CloudDirector.enhanced_prompt ─> MiniMaxH3CompileValidate
 CompileValidate.final_prompt ─> 官方 MiniMax H3 生成节点 prompt
 ```
+
+`MiniMaxH3VideoContext` 的 48 表示“最多选择 48 张代表帧”，不是 48 秒时间窗口；节点不会裁剪原视频。
+不需要真实时间码时，也可以把 IMAGE batch 直接接云端导演。若改用本地 LM Studio，把云端导演替换为
+`MiniMaxH3PromptDirector` 并保留相同的规则、素材、时间线和编译校验接线即可。
 
 自建规则推荐走结构化接线：
 
@@ -112,11 +121,20 @@ Gemini inline 模式会把全部参考图与序列帧媒体控制在约 15 MiB�
 全部已选帧，不会静默丢帧。600 帧档只用于验证 DeepSeek API 边界，不是日常默认；报告会同时给出
 请求上限、实际发送帧数、payload MiB、prompt token、transport 耗时和请求指纹，便于判断数量与耗时关系。
 
-如需保留真实时间码，可先接 `MiniMaxH3VideoContext`：它输出选帧批次和确定性 timeline manifest，
-二者分别接导演的 `video_frame_sequence` 与 `video_timeline_manifest`。导演二次取样后仍使用源视频帧索引、
-时间码与切镜分段；这只是轻量“时间线坐标层”，不做复杂剪辑工作台，也不生成数百张浏览器预览。
+`reference_fidelity` 将提示词改写自由度与参考视频跟随度分开：`auto` 在 Ref2VA 视频任务中按
+`structural` 执行，保留主要动作阶段、位移方向、真实切镜和顺序；`locked` 进一步锁定姿势、手势、机位和
+相对时点；`loose` 才允许把参考视频作为灵感重新编排。即使 `rewrite_mode=creative`，也不能越过所选跟随档。
+该字段对旧工作流为可选，缺失时由后端回退为 `auto`，不要求刷新浏览器或重建节点。I2VA/T2VA/FL2VA/L2VA
+接入超过官方数量的参考图时会在调用提示词 API 前停止并提示改用 Ref2VA，不会自动改变任务类型。
+导演还会按实际连接和用户显式声明生成 Picture/Video/Audio 清单；模型自行创造的越界标签会在进入 H3 前停止。
 
-序列帧快捷选择方式：
+如需保留真实时间码，可先接 `MiniMaxH3VideoContext`：它输出选帧批次和确定性 timeline manifest，
+二者分别接导演的 `video_frame_sequence` 与 `video_timeline_manifest`。两路同时连接时以上游选出的代表帧为准，
+导演节点的帧数、选帧方式和自定义选帧参数不再二次生效，并继续使用源视频帧索引、
+时间码与切镜分段。该节点不会裁剪输入视频，片段起止范围仍由上游视频加载/裁剪节点决定；
+它只是轻量“时间线坐标层”，不做复杂剪辑工作台，也不生成数百张浏览器预览。
+
+导演直连 IMAGE 批次时的序列帧快捷选择方式：
 
 - `uniform_full`：均匀覆盖完整序列并包含首尾，默认推荐。
 - `uniform_no_edges`：均匀覆盖约 10%–90%，适合片头/片尾可能有黑场或淡入淡出的视频。

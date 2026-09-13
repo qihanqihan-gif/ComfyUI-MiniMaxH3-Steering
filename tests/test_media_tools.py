@@ -122,6 +122,13 @@ def test_video_context_build_samples_and_emits_manifest():
     assert manifest["segments"][0]["end_sec"] == 2.5
     assert manifest["segments"][1]["start_sec"] == 2.5
     assert manifest["sequence_label"] == "<Video 1>"
+    assert manifest["schema"] == "minimax_h3.reference_video_timeline/v1"
+    assert manifest["asset"] == {
+        "id": "video_1",
+        "kind": "reference_video",
+        "label": "<Video 1>",
+        "roles": ["motion", "camera", "timing"],
+    }
     # 第一帧必须含 index 0（uniform 保首尾）
     assert manifest["selected_indices"][0] == 0
     assert manifest["selected_indices"][-1] == 119

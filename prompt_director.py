@@ -153,15 +153,38 @@ _TASK_RULES = {
     "I2VA": "首帧图生视频：<Picture 1> 是 0.00 秒首帧；保持身份、构图和场景锚点，再描述连续发展。",
     "FL2VA": "首尾帧生视频：<Picture 1> 是首帧，<Picture 2> 是尾帧；描述两者之间可观察、连续的变化路径。",
     "L2VA": "尾帧图生视频：<Picture 1> 是最终帧；推断合理前态并逐渐收束到该尾帧。",
-    "Ref2VA": "参考素材：参考图是角色与场景参考，允许重新构图；用 <Picture i> 引用并明确'作为角色与场景参考'。",
+    "Ref2VA": (
+        "参考素材：按用户指定用途分别使用每张 <Picture i>。只用于身份的图片写进对应 "
+        "<Subject N> 定义，不得自动扩展成场景、构图或风格参考；只有用户明确要求、且不违反"
+        "参考跟随档时才允许重新构图。"
+    ),
 }
 
 _REWRITE_MODES = {
     "strict": "严格遵循用户原始意图，只做结构化和镜头分配，不新增内容。",
     "balanced": "平衡：结构化 + 适度补全细节，保持用户核心意图。",
-    "creative": "创意：在用户意图基础上自由发挥，补充生动的镜头语言与细节。",
+    "creative": "创意：在用户意图基础上补充生动的镜头语言与细节，但只作用于未被用户或参考素材锁定的维度。",
     "transcribe": "忠实转译：用户原文按句保留、不改词、不扩写、不润色；只做格式套壳（字段名/时间码/标签/对白 <d> 语法）。创作策略模块的扩写要求在本档忽略，仅保留其结构/负面约束条款。用户以 [[原文块]] 包住的内容逐字进入对应字段。",
 }
+
+_REFERENCE_FIDELITY_MODES = ("auto", "locked", "structural", "loose")
+_REFERENCE_FIDELITY_RULES = {
+    "locked": (
+        "锁定跟随：用户未明确要求改变的动作阶段、姿势、手势、位移轨迹、景别、机位、真实切镜、"
+        "出现顺序与相对时点都必须来自 <Video 1>；只替换目标身份/外观，不得新增、删除、合并、"
+        "重排表演阶段或插入无来源特写。"
+    ),
+    "structural": (
+        "结构跟随：保留 <Video 1> 的主要动作阶段、位移方向、真实切镜与先后顺序；允许补全帧间"
+        "过渡和不改变阶段语义的微动作，但不得创造新的表演段、姿势主题或镜头类型。"
+    ),
+    "loose": (
+        "松散参考：可把 <Video 1> 作为动作与镜头灵感重新编排；仍不得声称未观察到的内容来自"
+        "参考视频，也不得把源表演者身份迁移给目标主体。"
+    ),
+}
+
+_MEDIA_LABEL_RE = re.compile(r"<(Picture|Video|Audio)\s+(\d+)>", re.IGNORECASE)
 
 # 2026-08-12：模型兼容层——不同模型对 JSON 输出纪律的遵循度不同，按 profile 注入差异指令
 _MODEL_PROFILES = [
@@ -184,7 +207,8 @@ _MODEL_COMPAT = {
     "deepseek_vision": (
         "先在同一次多模态请求中联合理解全部 <Picture N> 目标参考与 <Video 1> 有序代表帧，"
         "再直接输出一个完整合法 JSON 对象。不得把视频开头重绘为新的开场分镜，不得把源表演者"
-        "外观写入目标主体；不要复述视觉分析、思考过程或输出契约，JSON 完成后立即停止。"
+        "外观写入目标主体；参考视频的动作/镜头时间线是约束而不是灵感，除非用户明确要求改变；"
+        "不要复述视觉分析、思考过程或输出契约，JSON 完成后立即停止。"
     ),
     "gemini_vision": (
         "联合理解全部 <Picture N> 目标参考与同一 <Video 1> 的按时间排列代表帧，再直接输出"
@@ -205,6 +229,50 @@ _MODEL_COMPAT = {
         "源表演者外观迁移给目标主体；不要输出思考、分析摘要或 JSON 外文本。"
     ),
 }
+
+
+def _resolve_reference_fidelity(value: str, task_type: str, has_video: bool) -> tuple[str, str]:
+    mode = str(value or "auto").strip().lower()
+    if mode not in _REFERENCE_FIDELITY_MODES:
+        mode = "auto"
+    if not has_video or str(task_type).upper() != "REF2VA":
+        return mode, "本次没有 Ref2VA 的 <Video 1> 时间线；参考视频跟随档不生效。"
+    effective = "structural" if mode == "auto" else mode
+    rule = _REFERENCE_FIDELITY_RULES[effective]
+    return effective, (
+        "用户明确要求的变化优先；对用户未要求改变的维度，<Video 1> 是权威时间线证据。"
+        + rule
+        + " rewrite_mode 只决定该跟随边界内的文字补全自由度，不能覆盖本规则。"
+    )
+
+
+def _build_media_inventory(user_prompt: str, picture_count: int,
+                           has_video: bool) -> dict[str, int]:
+    """连接素材 + 用户明确写出的外部 H3 标签；不从模块或模型输出推断。"""
+    # 没有连接到导演不代表下游 H3 没有素材，因此缺失的类型记为“未知”并跳过
+    # 清单校验；一旦导演拿到视频证据，就能确定它不是独立 Audio 资产。
+    inventory: dict[str, int] = {}
+    if int(picture_count) > 0:
+        inventory["picture"] = int(picture_count)
+    if has_video:
+        inventory["video"] = 1
+        inventory["audio"] = 0
+    for kind, number in _MEDIA_LABEL_RE.findall(str(user_prompt or "")):
+        key = kind.casefold()
+        inventory[key] = max(inventory.get(key, 0), int(number))
+    return inventory
+
+
+def _format_media_inventory(inventory: dict[str, int]) -> str:
+    parts = []
+    for kind in ("picture", "video", "audio"):
+        label = kind.capitalize()
+        if kind not in inventory:
+            parts.append(f"{label}=未声明")
+            continue
+        count = max(0, int(inventory.get(kind, 0)))
+        parts.append(f"{label} 1..{count}" if count else f"{label}=无")
+    return "，".join(parts)
 
 
 def _is_qwen38(model_name: str) -> bool:
@@ -411,7 +479,9 @@ _H3_SYSTEM_TEMPLATE = """你是 MiniMax H3 视频生成模型的提示词导演�
 5. 不要额外输出 Markdown、解释、字段外文本或重复的分镜数组。
 6. 输出格式纪律：{model_compat}
 7. 参考媒体证据纪律：{media_evidence}
-8. 紧凑输出纪律：不要复述输入、规范、模块或分析过程；不要讨论指令冲突；只保留生成 H3 提示词所需事实。"""
+8. 参考视频跟随纪律：{reference_fidelity_rule}
+9. IR 合规纪律：{ir_discipline}
+10. 紧凑输出纪律：不要复述输入、规范、模块或分析过程；不要讨论指令冲突；只保留生成 H3 提示词所需事实。"""
 
 
 def _output_contract(task_type: str) -> str:
@@ -684,14 +754,37 @@ def _parse_timeline_manifest(value: str, input_frame_count: int | None = None) -
             "start_timecode": str(item.get("start_timecode") or ""),
             "end_timecode": str(item.get("end_timecode") or ""),
         })
-    return {
+    shot_boundaries = []
+    for value in raw.get("shot_boundaries_input", []):
+        try:
+            boundary = float(value)
+        except (TypeError, ValueError):
+            continue
+        if 0.0 < boundary < duration:
+            shot_boundaries.append(round(boundary, 4))
+    shot_boundaries = sorted(set(shot_boundaries))
+    projected = {
         "sequence_label": "<Video 1>",
         "total_frames": total_frames,
         "fps": round(fps, 3),
         "duration_seconds": round(duration, 4),
         "frames": frames,
         "segments": segments,
+        "shot_boundaries_input": shot_boundaries,
     }
+    # v1 先为多参考视频素材集合预留稳定身份与用途；旧 manifest 没有这两个字段时
+    # 仍按单一 <Video 1> 兼容。只投影固定值，避免外部 JSON 注入任意说明文本。
+    if raw.get("schema") == "minimax_h3.reference_video_timeline/v1":
+        projected["schema"] = raw["schema"]
+    asset = raw.get("asset")
+    if isinstance(asset, dict) and asset.get("kind") == "reference_video":
+        projected["asset"] = {
+            "id": "video_1",
+            "kind": "reference_video",
+            "label": "<Video 1>",
+            "roles": ["motion", "camera", "timing"],
+        }
+    return projected
 
 
 def _chat_completions_url(base_url: str) -> str:
@@ -2090,16 +2183,27 @@ class MiniMaxH3PromptDirector:
                 # v0.3：模型兼容 profile（auto=按模型名推断；gemma/qwen/cloud 手动指定）
                 "model_profile": (_MODEL_PROFILES, {"default": "auto"}),
                 # 新 widget 继续追加在末尾：长视频 batch 超限时包含首尾地均匀取样
-                "frame_sequence_limit": ("INT", {"default": 4, "min": 1, "max": 300, "step": 1}),
-                "frame_selection_mode": (_FRAME_SELECTION_MODES, {"default": "uniform_full"}),
+                "frame_sequence_limit": ("INT", {
+                    "default": 4, "min": 1, "max": 300, "step": 1,
+                    "tooltip": "仅直连 IMAGE 批次时生效；连接时间线 manifest 后由上游控制",
+                }),
+                "frame_selection_mode": (_FRAME_SELECTION_MODES, {
+                    "default": "uniform_full",
+                    "tooltip": "仅直连 IMAGE 批次时生效；连接时间线 manifest 后由上游控制",
+                }),
                 "frame_selection_spec": (
                     "STRING",
-                    {"default": "", "placeholder": "自定义：0,41,82,-1 或 0,33,66,100"},
+                    {"default": "", "placeholder": "仅直连：0,41,82,-1 或 0,33,66,100"},
                 ),
                 # 默认阻止 API/JSON/IR 失败时把原提示词静默送进昂贵的视频生成链。
                 "api_failure_policy": (["stop", "passthrough"], {"default": "stop"}),
             },
             "optional": {
+                # 可选而非必填：旧工作流/旧浏览器不会序列化这个新增字段，
+                # 后端签名会确定性回退 auto；新节点仍显示同一个普通 widget。
+                "reference_fidelity": (
+                    list(_REFERENCE_FIDELITY_MODES), {"default": "auto"},
+                ),
                 **{
                     f"ref_image_{i}": ("IMAGE", {"label": f"导演识图素材 {i}（不传给 H3）"})
                     for i in range(1, 10)
@@ -2142,7 +2246,7 @@ class MiniMaxH3PromptDirector:
                lmstudio_gpu_offload="auto", api_reasoning="auto", json_mode="auto_retry",
                model_profile="auto", frame_sequence_limit=4,
                frame_selection_mode="uniform_full", frame_selection_spec="",
-               api_failure_policy="stop", **kwargs):
+               api_failure_policy="stop", reference_fidelity="auto", **kwargs):
         t0 = time.time()
         # CloudDirector can inject a credential resolved by the backend. These
         # private kwargs are never ComfyUI inputs and therefore never serialize.
@@ -2271,6 +2375,15 @@ class MiniMaxH3PromptDirector:
                 ordinal = len(image_inputs) + 1
                 image_inputs.append((ordinal, img))
                 port_map.append((i, ordinal))
+        picture_limits = {"T2VA": 0, "I2VA": 1, "FL2VA": 2, "L2VA": 1}
+        picture_limit = picture_limits.get(str(task_type or "").upper())
+        if picture_limit is not None and len(image_inputs) > picture_limit:
+            return fail_or_passthrough(
+                f"{task_type} 最多允许 {picture_limit} 个 Picture 锚点，"
+                f"但导演接入了 {len(image_inputs)} 张参考图；已在调用提示词 API 前停止。"
+                "多参考图/参考视频编辑请显式选择 Ref2VA，并确认下游使用 "
+                "MiniMaxH3ReferenceToVideo；不要依赖节点自动更改任务类型"
+            )
         if is_gemini and image_inputs:
             # Preserve identity detail when possible, but keep reference images
             # from consuming the entire 20 MB inline request before video frames.
@@ -2305,17 +2418,43 @@ class MiniMaxH3PromptDirector:
         if sequence_input is not None:
             try:
                 requested_frame_limit = min(600, max(1, int(frame_sequence_limit or 1)))
-                effective_frame_limit = requested_frame_limit
-                if requested_frame_limit > 300 and not is_deepseek:
-                    effective_frame_limit = 300
-                    runtime_notes.append(
-                        f"[帧数上限] {requested_frame_limit} 是 DeepSeek 边界实验档；"
-                        "当前连接不是官方 DeepSeek，已收敛到 300。"
+                if not isinstance(sequence_input, torch.Tensor) or sequence_input.ndim not in (3, 4):
+                    raise TypeError("video_frame_sequence 必须是 ComfyUI IMAGE 张量")
+                sequence_input_total = 1 if sequence_input.ndim == 3 else int(sequence_input.shape[0])
+                timeline_controls_selection = False
+                if timeline_text:
+                    timeline_manifest = _parse_timeline_manifest(
+                        timeline_text, input_frame_count=sequence_input_total,
                     )
+                    timeline_controls_selection = True
+
+                if timeline_controls_selection:
+                    # Video Context 的 selected_frames 与 manifest 是一个不可拆分的素材包。
+                    # 上游已经决定代表帧；导演只允许按传输预算确定性降载，避免第二套人工
+                    # 选帧参数让用户无法判断哪一处真正生效。
+                    provider_cap = 600 if is_deepseek else 300
+                    effective_frame_limit = min(sequence_input_total, provider_cap)
+                    effective_selection_mode = "uniform_full"
+                    effective_selection_spec = ""
+                    if sequence_input_total > provider_cap:
+                        runtime_notes.append(
+                            f"[传输能力上限] 时间线上游提供 {sequence_input_total} 帧；"
+                            f"当前连接最多接收 {provider_cap} 帧，已均匀降载。"
+                        )
+                else:
+                    effective_frame_limit = requested_frame_limit
+                    effective_selection_mode = frame_selection_mode
+                    effective_selection_spec = frame_selection_spec
+                    if requested_frame_limit > 300 and not is_deepseek:
+                        effective_frame_limit = 300
+                        runtime_notes.append(
+                            f"[帧数上限] {requested_frame_limit} 是 DeepSeek 边界实验档；"
+                            "当前连接不是官方 DeepSeek，已收敛到 300。"
+                        )
                 sequence_frames, sequence_total, sequence_selection_note = _image_batch_to_data_urls(
                     sequence_input, limit=effective_frame_limit,
-                    selection_mode=frame_selection_mode,
-                    selection_spec=frame_selection_spec,
+                    selection_mode=effective_selection_mode,
+                    selection_spec=effective_selection_spec,
                     max_payload_bytes=(
                         _DEEPSEEK_SEQUENCE_PAYLOAD_BUDGET if is_deepseek else (
                             max(
@@ -2327,10 +2466,11 @@ class MiniMaxH3PromptDirector:
                     ),
                     adaptive=(is_deepseek or is_gemini),
                 )
-                sequence_input_total = sequence_total
-                if timeline_text:
-                    timeline_manifest = _parse_timeline_manifest(
-                        timeline_text, input_frame_count=sequence_input_total,
+                if timeline_controls_selection:
+                    note_tail = sequence_selection_note.partition("；")[2]
+                    sequence_selection_note = (
+                        f"时间线上游已选 {sequence_input_total} 帧，导演未二次选帧"
+                        + (f"；{note_tail}" if note_tail else "")
                     )
                     remapped = []
                     for local_index, data_url in sequence_frames:
@@ -2340,15 +2480,22 @@ class MiniMaxH3PromptDirector:
                     sequence_frames = remapped
                     sequence_total = int(timeline_manifest["total_frames"])
                     runtime_notes.append(
-                        f"[时间线 manifest] 已恢复源视频 fps={timeline_manifest['fps']:g}、"
+                        f"[参考素材时间线] 已恢复源视频 fps={timeline_manifest['fps']:g}、"
                         f"时长={timeline_manifest['duration_seconds']:.3f}s、"
-                        f"源帧总数={sequence_total}；导演二次选帧仍使用真实源索引。"
+                        f"源帧总数={sequence_total}；上游代表帧选择优先，"
+                        "导演节点的帧数、选帧方式与自定义选帧参数本次不生效。"
                     )
-                if is_deepseek and requested_frame_limit > 300:
+                if is_deepseek and requested_frame_limit > 300 and not timeline_controls_selection:
                     runtime_notes.append(
                         f"[DeepSeek 600 帧边界实验] 请求上限={requested_frame_limit}，"
                         f"实际编码并准备发送={len(sequence_frames)}；"
                         "最终以报告中的 payload、prompt token 与 transport 耗时为准。"
+                    )
+                if len(sequence_frames) > 120:
+                    runtime_notes.append(
+                        f"[高密度时间线提醒] 本次准备发送 {len(sequence_frames)} 帧；"
+                        "这属于长多图时序压力档，不应把接口接收成功等同于动作顺序理解稳定。"
+                        "正式回归优先使用 24/48 帧并与 staged 做 A/B。"
                     )
                 if sequence_selection_note.startswith("[选择回退]"):
                     module_notes.append(f"[序列帧警告] {sequence_selection_note}")
@@ -2447,6 +2594,31 @@ class MiniMaxH3PromptDirector:
             # 自定义 OpenAI 兼容（custom）host 无法识别，其 profile 由 preset 显式指定。
             resolved_profile = "openai_compat_vision"
         compat = _MODEL_COMPAT[resolved_profile]
+        has_video_evidence = bool(sequence_frames or native_video_source is not None)
+        effective_fidelity, reference_fidelity_rule = _resolve_reference_fidelity(
+            reference_fidelity, task_type, has_video_evidence,
+        )
+        media_inventory = _build_media_inventory(
+            prompt, len(images), has_video_evidence,
+        )
+        media_inventory_text = _format_media_inventory(media_inventory)
+        ir_discipline = (
+            "镜头标签必须按出现顺序从 [Shot 1] 连续递增到 [Shot N]，不得从 2 开始或跳号。"
+            "只有参考视频发生真实切镜时才开始新的 [Shot N]；同一连续镜头中的动作阶段继续写在"
+            "同一个 Shot 内，不得为了分段说明而虚构切镜。人物进出画、动作或姿势改变、运镜、"
+            "遮挡、闪白和景深变化本身都不等于切镜；只有前后画面构图发生不连续跳变才算真实切镜。"
+            f"本次可用或由用户明确声明的媒体清单：{media_inventory_text}；"
+            "不得创建清单外的 <Picture N>/<Video N>/<Audio N>。同一有效媒体标签可以在多个官方"
+            "字段中重复引用，重复引用不是新增素材。I2VA 只能使用 <Picture 1>；多参考图任务使用"
+            "Ref2VA。任何模块或改写模式与官方 IR 契约冲突时，以官方 IR 契约和本清单为准。"
+        )
+        if media_inventory.get("audio") == 0:
+            ir_discipline += (
+                "本次没有独立 <Audio N> 素材：不得声称复用、保留或原样采用源视频的人声、台词、"
+                "歌声、音乐或音色；不得从嘴型、画面文字或字幕推断并抄写台词、歌词或音乐。只有"
+                "用户在本次文本中明确给出的台词或配乐要求才可采用；否则声音字段只写最少量、由"
+                "H3 新生成且与可见动作一致的环境声/动作声，non_diegetic_music 写 N/A。"
+            )
         # 防幻觉条款：按实际媒体证据状态声明（Easy 插件 nodes.py:753-764 先例改编）
         evidence_parts = []
         if images:
@@ -2471,16 +2643,41 @@ class MiniMaxH3PromptDirector:
             evidence_parts.append(
                 "本次请求附带一个 Gemini 原生 <Video 1> 文件；它是一条连续视频时间线，"
                 "包含原文件中的画面、时间顺序与音频（若源文件具有音轨），不是独立图片集合。"
-                "只从该视频保留动作、姿势顺序、场景、镜头、声音和待替换源表演者的位置；"
+                "从该视频提取动作、姿势顺序、场景、镜头和待替换源表演者的位置；"
+                "可观察声音只用于理解表演节奏，是否能在最终提示词中引用仍以媒体清单为准；"
                 "除非用户明确要求，否则不得把源表演者身份或服装写入目标主体。"
             )
+        if has_video_evidence:
+            if timeline_manifest:
+                source_duration = float(timeline_manifest.get("duration_seconds") or 0.0)
+                evidence_parts.append(
+                    f"时间线 manifest 指明 <Video 1> 源片段时长为 {source_duration:.3f}s，"
+                    f"目标成片时长为 {float(duration_seconds):.3f}s；按归一化进度映射并保持阶段顺序，"
+                    "不得把目标时长误写成源片段时长。"
+                )
+                if source_duration > float(duration_seconds) * 1.5:
+                    runtime_notes.append(
+                        f"[时长映射提醒] <Video 1> 源片段 {source_duration:.3f}s / "
+                        f"目标 {float(duration_seconds):.3f}s；动作会被明显压缩，"
+                        "逐时点跟随回归应先裁成与目标相同的时长。"
+                    )
+            else:
+                evidence_parts.append(
+                    "本次未提供 video_timeline_manifest，无法知道源片段的 fps 与真实时长；"
+                    "不得声称源片段等于目标时长，也不得虚构源视频的精确秒点。"
+                )
         if task_type == "Ref2VA" and images and (sequence_frames or native_video_source is not None):
             evidence_parts.append(
                 "若用户意图是人物替换或视频动作迁移：必须在 subject_definitions 中用可观察到的"
                 "发型、脸部/眼睛、体型、服装和 3–5 个身份关键特征，明确把目标 <Subject N> 绑定到"
                 "相应 <Picture N>；同时从 <Video 1> 摘要中只采用一条最短 source_performer_locator"
                 "定位待替换对象，并立即声明该源人物外观不被保留。不得用泛称‘动漫女孩/一个人’"
-                "代替目标外观描述。"
+                "代替目标外观描述。目标参考图与用户明确文字对身份、服装、身体部件数量、所在侧和"
+                "连接关系拥有最高权威；明确的单侧或其他非对称特征必须保持，不得镜像、补齐或"
+                "对称化。源视频只迁移动作、姿势、位移、镜头和时序。source_performer_locator 只能"
+                "使用人数、画面位置或正在进行的动作（例如‘画面中央唯一的表演者’），不得描述其"
+                "发色、脸、服装、翅膀、肢体等外观；随后只写‘源人物外观不保留’，不得在最终 "
+                "Prompt IR 的任何字段逐项枚举已丢弃的源人物外观细节。"
             )
         if evidence_parts:
             media_evidence = (
@@ -2502,6 +2699,8 @@ class MiniMaxH3PromptDirector:
             output_contract=_output_contract(task_type),
             model_compat=compat,
             media_evidence=media_evidence,
+            reference_fidelity_rule=reference_fidelity_rule,
+            ir_discipline=ir_discipline,
         )
         # v0.1：协议自动注入（仅英文输出；Ref2VA→六段式，其余→三段式）+ 创作策略模块
         protocol = ""
@@ -2600,13 +2799,25 @@ class MiniMaxH3PromptDirector:
                 ),
             })
         elif sequence_frames:
+            explicit_cut_points = timeline_manifest.get("shot_boundaries_input", [])
+            if explicit_cut_points:
+                cut_rule = (
+                    "上游已明确真实切镜边界为 "
+                    + ", ".join(f"{point:.3f}s" for point in explicit_cut_points)
+                    + "；最终 [Shot N] 必须严格按这些边界分段，不得增加或遗漏。"
+                )
+            else:
+                cut_rule = (
+                    "上游没有提供明确切镜边界；只把前后构图的不连续跳变判断为切镜，"
+                    "人物进出画、动作阶段、运镜、遮挡或闪白不得单独新建 Shot。"
+                )
             user_content.append({
                 "type": "text",
                 "text": (
                     f"以下 {len(sequence_frames)} 张图片按输入顺序共同构成 <Video 1> 的代表帧时间线；"
                     "它们是同一段视频的连续时间证据，只用于观察动作、镜头、场景和定位源表演者，"
                     "不是独立的 <Picture N> 参考资产或多段视频。先聚合动作阶段与真实切镜点，"
-                    "不要逐帧复述，不得重绘、新增或重设计开头。"
+                    "不要逐帧复述，不得重绘、新增或重设计开头。" + cut_rule
                 ),
             })
             timeline_by_source = {
@@ -2735,6 +2946,7 @@ class MiniMaxH3PromptDirector:
         try:
             compiled = _load_h3_compiler().compile_prompt_ir(
                 parsed, task_type=task_type, duration=duration_seconds,
+                media_inventory=media_inventory,
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.error("MiniMax H3 PromptDirector: IR 编译失败: %s", exc)
@@ -2744,6 +2956,10 @@ class MiniMaxH3PromptDirector:
             compiled["ir"]["applied_modules"] = module_ids
         ir_json = json.dumps(compiled["ir"], ensure_ascii=False, indent=2)
         shots_out = compiled["validation"]["checks"]["shot_count"]
+        if compiled.get("normalizations"):
+            runtime_notes.append(
+                "[确定性规范化] " + "；".join(compiled["normalizations"])
+            )
         # v0.2：Reference Sheet 输出（两阶段时含逐素材事实 JSON，否则空）
         sheet_payload = {}
         if sheet_items:
@@ -2755,8 +2971,11 @@ class MiniMaxH3PromptDirector:
                 "director_input_frame_count": sequence_input_total,
                 "sent_frame_count": len(sequence_frames),
                 "selected_indices": [idx for idx, _ in sequence_frames],
-                "selection_mode": frame_selection_mode,
-                "selection_spec": str(frame_selection_spec or ""),
+                "selection_owner": "timeline_context" if timeline_manifest else "director",
+                "selection_mode": (
+                    "timeline_context" if timeline_manifest else frame_selection_mode
+                ),
+                "selection_spec": "" if timeline_manifest else str(frame_selection_spec or ""),
                 "selection_note": sequence_selection_note,
                 "note": "API 时间线证据；不占用 Picture 标签，也不会自动传给 H3。",
             }
@@ -2790,6 +3009,8 @@ class MiniMaxH3PromptDirector:
                 f"最终思考策略={_reasoning_report_mode(api_base_url, api_reasoning, model, 'final')} "
                 f"素材分析思考策略={_reasoning_report_mode(api_base_url, api_reasoning, model, 'analysis')}"
             ),
+            f"参考视频跟随档={effective_fidelity}（节点值={reference_fidelity}）",
+            f"IR 媒体清单={media_inventory_text}",
             f"API Key 来源={key_source}（值不写入报告）",
             f"导演识图素材={len(images)} 张（仅发送给提示词 API；端口→标签 {port_map}）",
             (
@@ -3011,11 +3232,17 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
                 "timeout_s": ("INT", {"default": 600, "min": 30, "max": 1800, "step": 10}),
                 "api_reasoning": (["auto", "off", "on"], {"default": "auto"}),
                 "analysis_mode": (["auto", "single", "staged"], {"default": "auto"}),
-                "frame_sequence_limit": ("INT", {"default": 48, "min": 1, "max": 600, "step": 1}),
-                "frame_selection_mode": (_FRAME_SELECTION_MODES, {"default": "uniform_full"}),
+                "frame_sequence_limit": ("INT", {
+                    "default": 48, "min": 1, "max": 600, "step": 1,
+                    "tooltip": "仅直连 IMAGE 批次时生效；连接时间线 manifest 后由上游控制",
+                }),
+                "frame_selection_mode": (_FRAME_SELECTION_MODES, {
+                    "default": "uniform_full",
+                    "tooltip": "仅直连 IMAGE 批次时生效；连接时间线 manifest 后由上游控制",
+                }),
                 "frame_selection_spec": (
                     "STRING",
-                    {"default": "", "placeholder": "自定义：0,41,82,-1 或 0,33,66,100"},
+                    {"default": "", "placeholder": "仅直连：0,41,82,-1 或 0,33,66,100"},
                 ),
                 # ComfyUI 按 widgets_values 的位置恢复旧工作流。新增字段必须追加在
                 # 末尾，不能插进 api_model/temperature 等既有字段中间。
@@ -3035,6 +3262,10 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
                 ),
             },
             "optional": {
+                # 兼容没有该字段的旧 workflow/API prompt；函数默认值为 auto。
+                "reference_fidelity": (
+                    list(_REFERENCE_FIDELITY_MODES), {"default": "auto"},
+                ),
                 **{
                     f"ref_image_{i}": ("IMAGE", {"label": f"云端导演识图素材 {i}（不传给 H3）"})
                     for i in range(1, 10)
@@ -3066,10 +3297,11 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
 
     def direct_cloud(self, prompt, task_type, duration_seconds, shot_count, rewrite_mode,
                      output_language, cloud_provider, api_model, temperature, max_tokens,
-                     timeout_s, api_reasoning="auto", analysis_mode="auto",
-                     frame_sequence_limit=48, frame_selection_mode="uniform_full",
-                     frame_selection_spec="", cloud_base_url="", my_preset="",
-                     gemini_video_route="auto", gemini_video_fps=0.0, **kwargs):
+                      timeout_s, api_reasoning="auto", analysis_mode="auto",
+                      frame_sequence_limit=48, frame_selection_mode="uniform_full",
+                      frame_selection_spec="", cloud_base_url="", my_preset="",
+                      gemini_video_route="auto", gemini_video_fps=0.0,
+                      reference_fidelity="auto", **kwargs):
         cloud_video_source = kwargs.pop("cloud_video", None)
         comfy_video = kwargs.pop("comfy_video", None)
         if cloud_video_source is not None and comfy_video is not None:
@@ -3209,6 +3441,7 @@ class MiniMaxH3CloudDirector(MiniMaxH3PromptDirector):
             frame_selection_mode=frame_selection_mode,
             frame_selection_spec=frame_selection_spec,
             api_failure_policy=preset["api_failure_policy"],
+            reference_fidelity=reference_fidelity,
             analysis_mode=analysis_mode,
             _resolved_api_key=key,
             _resolved_api_key_source=key_source,

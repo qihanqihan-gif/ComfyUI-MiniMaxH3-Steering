@@ -1,8 +1,8 @@
 {
   "id": "e3f2b845-8f2c-4b5a-9caf-eac1029d3e7e",
-  "revision": 0,
-  "last_node_id": 282,
-  "last_link_id": 483,
+  "revision": 1,
+  "last_node_id": 288,
+  "last_link_id": 484,
   "nodes": [
     {
       "id": 218,
@@ -1091,8 +1091,8 @@
       "id": 279,
       "type": "MiniMaxH3CompileValidate",
       "pos": [
-        -2210,
-        3660
+        -2640,
+        3650
       ],
       "size": [
         400,
@@ -1180,15 +1180,15 @@
         "",
         "AUTO",
         5,
-        false
+        true
       ]
     },
     {
       "id": 280,
       "type": "Display Any (rgthree)",
       "pos": [
-        -1810,
-        3660
+        -2190,
+        3650
       ],
       "size": [
         340,
@@ -1632,19 +1632,19 @@
       "id": 282,
       "type": "Note",
       "pos": [
-        -3360,
-        4530
+        -3260,
+        5240
       ],
       "size": [
-        490,
-        370
+        1020,
+        390
       ],
       "flags": {},
       "order": 12,
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "运行前检查：当前研究流的三处关键设置",
+      "title": "运行前检查：公开模板",
       "properties": {
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -1653,7 +1653,7 @@
         }
       },
       "widgets_values": [
-        "【公开研究模板使用说明】\n1. 先在两个 Load Image 节点中选择你自己的参考图；示例文件名只是占位，不随仓库分发。\n2. PromptDirector 与下游官方节点均已按 Ref2VA 对齐；同一素材分别接“导演识图素材”和官方“参考图端口”，前者只供 LM Studio 规划提示词，后者才会进入 H3 条件。\n3. 模块正文与 module_manifest 已同时接入导演，便于追踪作用域和冲突。\n4. OpenCache 与 Steering 默认旁路，先建立固定 seed/5 秒/24 步基线，再逐项启用。\n5. Ref2VA 的图片都是软参考，不会锁定第 0 帧；必须硬首帧时请换 Image to Video 工作流。\n\n此模板保留部分常用第三方辅助节点。缺少节点时请看 example_workflows/README.md 的依赖表；核心提示词链可单独保留。"
+        "【运行前检查】\n1. 替换两个 Load Image 占位素材；仓库不分发示例图片。\n2. 确认模型、文本编码器、视频 VAE、音频 VAE 与 LoRA 文件名适配本机。\n3. 在云端导演底部管理器配置本机凭据；工作流内的模型 ID、Base URL 和已保存连接名保持空白。\n4. 第一次保持 5 秒、24 步、固定 seed；OpenCache 与 Steering 继续旁路，先验证无加速基线。\n5. 先查看 IR 编译校验结果，再开始长视频或多 seed 批量测试。缺少第三方显示/清理节点时可删除对应辅助子图，不影响核心生成链。"
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -1835,17 +1835,24 @@
       "id": 274,
       "type": "MiniMaxH3PromptModuleLoader",
       "pos": [
-        -3370,
-        3710
+        -3750,
+        3650
       ],
       "size": [
-        400,
-        250
+        420,
+        380
       ],
       "flags": {},
       "order": 16,
       "mode": 0,
       "inputs": [
+        {
+          "label": "外部规则包（接文件直载节点）",
+          "name": "external_rule_pack",
+          "shape": 7,
+          "type": "H3_PROMPT_RULE_PACK",
+          "link": 484
+        },
         {
           "label": "作用域",
           "name": "scope",
@@ -1856,7 +1863,7 @@
           "link": null
         },
         {
-          "label": "模块 1",
+          "label": "优先规则 1",
           "name": "module_1",
           "type": "COMBO",
           "widget": {
@@ -1865,7 +1872,7 @@
           "link": null
         },
         {
-          "label": "模块 2",
+          "label": "优先规则 2",
           "name": "module_2",
           "type": "COMBO",
           "widget": {
@@ -1874,7 +1881,7 @@
           "link": null
         },
         {
-          "label": "模块 3",
+          "label": "优先规则 3",
           "name": "module_3",
           "type": "COMBO",
           "widget": {
@@ -1890,11 +1897,47 @@
             "name": "custom_instructions"
           },
           "link": null
+        },
+        {
+          "label": "优先规则 4",
+          "name": "module_4",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_4"
+          },
+          "link": null
+        },
+        {
+          "label": "优先规则 5",
+          "name": "module_5",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_5"
+          },
+          "link": null
+        },
+        {
+          "label": "规则库文件夹",
+          "name": "module_folder",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_folder"
+          },
+          "link": null
+        },
+        {
+          "label": "规则渲染档（A/B 实验）",
+          "name": "render_profile",
+          "type": "COMBO",
+          "widget": {
+            "name": "render_profile"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
-          "label": "提示词模块（接导演节点）",
+          "label": "已解析创作规则（接导演节点）",
           "name": "system_prompt_module",
           "type": "STRING",
           "links": [
@@ -1902,19 +1945,19 @@
           ]
         },
         {
-          "label": "模块预览",
+          "label": "规则预览",
           "name": "module_preview",
           "type": "STRING",
           "links": null
         },
         {
-          "label": "模块诊断",
+          "label": "规则诊断",
           "name": "module_diagnostics",
           "type": "STRING",
           "links": null
         },
         {
-          "label": "模块清单（接导演节点）",
+          "label": "规则解析清单（接导演节点）",
           "name": "module_manifest",
           "type": "STRING",
           "links": [
@@ -1927,15 +1970,19 @@
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
-          "version": "7.3"
+          "version": "7.8"
         }
       },
       "widgets_values": [
         "Ref2VA",
-        "动漫角色身份保持",
-        "动态壁纸（无缝循环）",
-        "单镜连续性",
-        ""
+        "人物替换（Ref2VA 换人复刻）",
+        "（无）",
+        "（无）",
+        "",
+        "（无）",
+        "（无）",
+        "内置（默认）",
+        "standard"
       ]
     },
     {
@@ -2038,98 +2085,126 @@
     },
     {
       "id": 271,
-      "type": "MiniMaxH3PromptDirector",
+      "type": "MiniMaxH3CloudDirector",
       "pos": [
-        -2620,
-        3720
+        -3270,
+        3650
       ],
       "size": [
-        430,
-        700
+        570,
+        920
       ],
       "flags": {},
       "order": 21,
       "mode": 0,
       "inputs": [
         {
-          "label": "导演识图素材 1（不传给 H3）",
+          "label": "云端导演识图素材 1（不传给 H3）",
           "name": "ref_image_1",
           "shape": 7,
           "type": "IMAGE",
           "link": 472
         },
         {
-          "label": "导演识图素材 2（不传给 H3）",
+          "label": "云端导演识图素材 2（不传给 H3）",
           "name": "ref_image_2",
           "shape": 7,
           "type": "IMAGE",
           "link": 479
         },
         {
-          "label": "导演识图素材 3（不传给 H3）",
+          "label": "云端导演识图素材 3（不传给 H3）",
           "name": "ref_image_3",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 4（不传给 H3）",
+          "label": "云端导演识图素材 4（不传给 H3）",
           "name": "ref_image_4",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 5（不传给 H3）",
+          "label": "云端导演识图素材 5（不传给 H3）",
           "name": "ref_image_5",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 6（不传给 H3）",
+          "label": "云端导演识图素材 6（不传给 H3）",
           "name": "ref_image_6",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 7（不传给 H3）",
+          "label": "云端导演识图素材 7（不传给 H3）",
           "name": "ref_image_7",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 8（不传给 H3）",
+          "label": "云端导演识图素材 8（不传给 H3）",
           "name": "ref_image_8",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "导演识图素材 9（不传给 H3）",
+          "label": "云端导演识图素材 9（不传给 H3）",
           "name": "ref_image_9",
           "shape": 7,
           "type": "IMAGE",
           "link": null
         },
         {
-          "label": "提示词模块（接模块节点）",
+          "label": "参考视频帧 / 图像序列（同一 <Video 1> 时间线；仅供 API）",
+          "name": "video_frame_sequence",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "Gemini 原生视频（与视频帧二选一；仅供 API）",
+          "name": "cloud_video",
+          "shape": 7,
+          "type": "MINIMAX_H3_CLOUD_VIDEO",
+          "link": null
+        },
+        {
+          "label": "Comfy 原生 VIDEO（与上两路二选一；仅供 API）",
+          "name": "comfy_video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "label": "参考视频时间线 manifest（可选；接视频时间线上下文）",
+          "name": "video_timeline_manifest",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "label": "创作规则（接规则组合节点）",
           "name": "system_module",
           "shape": 7,
           "type": "STRING",
           "link": 474
         },
         {
-          "label": "模块清单（接模块节点第 4 输出）",
+          "label": "规则解析清单（接规则组合节点第 4 输出）",
           "name": "module_manifest",
           "shape": 7,
           "type": "STRING",
           "link": 483
         },
         {
-          "label": "用户意图（描述要生成的视频）",
+          "label": "用户意图（描述视频、素材分工与保留/替换规则）",
           "name": "prompt",
           "type": "STRING",
           "widget": {
@@ -2183,34 +2258,25 @@
           "link": null
         },
         {
-          "label": "API 地址",
-          "name": "api_base_url",
-          "type": "STRING",
+          "label": "云端连接 / 兼容预设",
+          "name": "cloud_provider",
+          "type": "COMBO",
           "widget": {
-            "name": "api_base_url"
+            "name": "cloud_provider"
           },
           "link": null
         },
         {
-          "label": "模型 ID",
+          "label": "模型 ID（官方预设可留空；OpenAI 兼容必填）",
           "name": "api_model",
-          "type": "COMBO",
+          "type": "STRING",
           "widget": {
             "name": "api_model"
           },
           "link": null
         },
         {
-          "label": "API 密钥",
-          "name": "api_key",
-          "type": "STRING",
-          "widget": {
-            "name": "api_key"
-          },
-          "link": null
-        },
-        {
-          "label": "温度",
+          "label": "生成温度（预设可按供应商忽略）",
           "name": "temperature",
           "type": "FLOAT",
           "widget": {
@@ -2219,7 +2285,7 @@
           "link": null
         },
         {
-          "label": "最大令牌数",
+          "label": "Prompt IR 最大输出令牌",
           "name": "max_tokens",
           "type": "INT",
           "widget": {
@@ -2228,7 +2294,7 @@
           "link": null
         },
         {
-          "label": "超时（秒）",
+          "label": "单次调用超时（秒）",
           "name": "timeout_s",
           "type": "INT",
           "widget": {
@@ -2237,25 +2303,7 @@
           "link": null
         },
         {
-          "label": "跑完后 LM Studio 模型处理",
-          "name": "lmstudio_after_use",
-          "type": "COMBO",
-          "widget": {
-            "name": "lmstudio_after_use"
-          },
-          "link": null
-        },
-        {
-          "label": "LM Studio GPU 加载策略",
-          "name": "lmstudio_gpu_offload",
-          "type": "COMBO",
-          "widget": {
-            "name": "lmstudio_gpu_offload"
-          },
-          "link": null
-        },
-        {
-          "label": "模型思考",
+          "label": "思考强度（由云端预设转译）",
           "name": "api_reasoning",
           "type": "COMBO",
           "widget": {
@@ -2264,20 +2312,83 @@
           "link": null
         },
         {
-          "label": "JSON 模式",
-          "name": "json_mode",
-          "type": "COMBO",
-          "widget": {
-            "name": "json_mode"
-          },
-          "link": null
-        },
-        {
-          "label": "视觉分析模式",
+          "label": "参考图与视频帧的上传方式",
           "name": "analysis_mode",
           "type": "COMBO",
           "widget": {
             "name": "analysis_mode"
+          },
+          "link": null
+        },
+        {
+          "label": "直连视频帧上限",
+          "name": "frame_sequence_limit",
+          "type": "INT",
+          "widget": {
+            "name": "frame_sequence_limit"
+          },
+          "link": null
+        },
+        {
+          "label": "直连视频选帧",
+          "name": "frame_selection_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "frame_selection_mode"
+          },
+          "link": null
+        },
+        {
+          "label": "直连自定义帧序号 / 百分比",
+          "name": "frame_selection_spec",
+          "type": "STRING",
+          "widget": {
+            "name": "frame_selection_spec"
+          },
+          "link": null
+        },
+        {
+          "label": "OpenAI 兼容 Base URL（仅该连接使用）",
+          "name": "cloud_base_url",
+          "type": "STRING",
+          "widget": {
+            "name": "cloud_base_url"
+          },
+          "link": null
+        },
+        {
+          "label": "已保存连接名（仅 OpenAI 兼容）",
+          "name": "my_preset",
+          "type": "STRING",
+          "widget": {
+            "name": "my_preset"
+          },
+          "link": null
+        },
+        {
+          "label": "Gemini 原生视频传输方式",
+          "name": "gemini_video_route",
+          "type": "COMBO",
+          "widget": {
+            "name": "gemini_video_route"
+          },
+          "link": null
+        },
+        {
+          "label": "Gemini 原生视频采样 FPS（0=官方默认 1 FPS）",
+          "name": "gemini_video_fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "gemini_video_fps"
+          },
+          "link": null
+        },
+        {
+          "label": "参考视频跟随档",
+          "name": "reference_fidelity",
+          "type": "COMBO",
+          "widget": {
+            "name": "reference_fidelity"
           },
           "link": null
         }
@@ -2292,7 +2403,7 @@
           ]
         },
         {
-          "label": "诊断报告",
+          "label": "云端调用与校验报告",
           "name": "report",
           "type": "STRING",
           "links": null
@@ -2311,39 +2422,45 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "MiniMaxH3PromptDirector",
+        "Node name for S&R": "MiniMaxH3CloudDirector",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
-          "version": "7.3"
-        }
+          "version": "7.8"
+        },
+        "minimax_h3_cloud_widget_schema": 5
       },
       "widgets_values": [
-        "auto",
+        "",
         "Ref2VA",
         5,
-        0.3,
+        0,
         "balanced",
         "English",
-        "http://127.0.0.1:1234/v1",
-        "auto",
+        "deepseek",
         "",
-        0.3,
-        8192,
-        180,
-        "unload_and_wait_for_vram",
+        0.2,
+        16384,
+        600,
         "auto",
         "auto",
-        "auto_retry",
+        48,
+        "uniform_full",
+        "",
+        "",
+        "",
+        "auto",
+        0,
         "auto"
-      ]
+      ],
+      "title": "云端导演（模板主路径）"
     },
     {
       "id": 255,
       "type": "PrimitiveStringMultiline",
       "pos": [
-        -3360,
-        4030
+        -3750,
+        4080
       ],
       "size": [
         370,
@@ -2390,6 +2507,349 @@
       ],
       "color": "#322",
       "bgcolor": "#533"
+    },
+    {
+      "id": 283,
+      "type": "MiniMaxH3ModuleFolderLoader",
+      "pos": [
+        -4210,
+        3650
+      ],
+      "size": [
+        400,
+        240
+      ],
+      "flags": {},
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模块文件 1（按路径分类）",
+          "name": "module_file",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_file"
+          },
+          "link": null
+        },
+        {
+          "label": "模块文件 2",
+          "name": "module_file_2",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_file_2"
+          },
+          "link": null
+        },
+        {
+          "label": "模块文件 3",
+          "name": "module_file_3",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_file_3"
+          },
+          "link": null
+        },
+        {
+          "label": "模块文件 4",
+          "name": "module_file_4",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_file_4"
+          },
+          "link": null
+        },
+        {
+          "label": "模块文件 5",
+          "name": "module_file_5",
+          "type": "COMBO",
+          "widget": {
+            "name": "module_file_5"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "原样规则文本（轻量直连 / A-B 对照）",
+          "name": "system_prompt_module",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "label": "直载诊断",
+          "name": "diagnostics",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "label": "结构化规则包（接规则组合节点）",
+          "name": "rule_pack",
+          "type": "H3_PROMPT_RULE_PACK",
+          "links": [
+            484
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3ModuleFolderLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "（未选择）",
+        "（未选择）",
+        "（未选择）",
+        "（未选择）",
+        "（未选择）"
+      ]
+    },
+    {
+      "id": 284,
+      "type": "MiniMaxH3VideoContext",
+      "pos": [
+        -4210,
+        4560
+      ],
+      "size": [
+        430,
+        300
+      ],
+      "flags": {},
+      "order": 35,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "参考视频帧（按时间顺序）",
+          "name": "video_frame_sequence",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "源帧率（FPS）",
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": null
+        },
+        {
+          "label": "参考片段时长（0=自动）",
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "duration_seconds"
+          },
+          "link": null
+        },
+        {
+          "label": "代表帧数（0=全部）",
+          "name": "frame_sequence_limit",
+          "type": "INT",
+          "widget": {
+            "name": "frame_sequence_limit"
+          },
+          "link": null
+        },
+        {
+          "label": "代表帧分布",
+          "name": "frame_selection_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "frame_selection_mode"
+          },
+          "link": null
+        },
+        {
+          "label": "真实切镜点（可选）",
+          "name": "shot_boundaries",
+          "type": "STRING",
+          "widget": {
+            "name": "shot_boundaries"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "代表帧（接导演参考视频帧）",
+          "name": "selected_frames",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "label": "参考视频时间线（接导演同名接口）",
+          "name": "timeline_manifest",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "label": "构建报告",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3VideoContext",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        24,
+        0,
+        48,
+        "uniform",
+        ""
+      ]
+    },
+    {
+      "id": 285,
+      "type": "MiniMaxH3CloudVideoInput",
+      "pos": [
+        -3740,
+        4560
+      ],
+      "size": [
+        400,
+        150
+      ],
+      "flags": {},
+      "order": 36,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "选择 / 上传视频（仅运行时送往 Gemini）",
+          "name": "video",
+          "type": "COMBO",
+          "widget": {
+            "name": "video"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "云端视频运行时对象（接云端导演）",
+          "name": "cloud_video",
+          "type": "MINIMAX_H3_CLOUD_VIDEO",
+          "links": null
+        },
+        {
+          "label": "文件类型与体积报告",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3CloudVideoInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 286,
+      "type": "Note",
+      "pos": [
+        -4210,
+        3300
+      ],
+      "size": [
+        1000,
+        300
+      ],
+      "flags": {},
+      "order": 37,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "从这里开始：公开 Ref2VA 云端导演模板",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "【主路径】\n1. 文件直载（可选）→ 创作规则组合 → 云端导演 → IR 编译校验 → 官方 MiniMax H3 ReferenceToVideo。\n2. 模板默认 Ref2VA / balanced / reference_fidelity=auto / 5 秒；编译校验失败会停止，不把不合规提示词送入 H3。\n3. 两张占位参考图要替换为自己的素材；同一张图既接导演识图口，也接官方 H3 参考图口。\n4. 云端导演只生成提示词，不会把图片或视频自动送入 H3。需要本地 LM Studio 时，可用 MiniMaxH3PromptDirector 替换云端导演并保持同样四路输出接法。"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 287,
+      "type": "Note",
+      "pos": [
+        -4210,
+        4930
+      ],
+      "size": [
+        900,
+        360
+      ],
+      "flags": {},
+      "order": 38,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "参考视频时间线：48 帧不是 48 秒",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "【可选工具，默认不接线】\n• Video Timeline Context 的输入是上游视频加载器解出的、按时间顺序排列的 IMAGE 批次。\n• “代表帧数=48”表示从完整片段均匀选择最多 48 张代表帧，不是 48 秒窗口，也不会裁剪视频；时长填 0 时按总帧数/FPS 推导。\n• 使用时把 selected_frames 接云端导演 video_frame_sequence，把 timeline_manifest 接 video_timeline_manifest；连接 manifest 后，导演自身的直连选帧参数不再二次生效。\n• 完整参考视频仍要从加载器另一路接官方 H3 的 ref_video；时间线节点只给提示词 API 提供坐标和代表帧。"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 288,
+      "type": "Note",
+      "pos": [
+        -3260,
+        4640
+      ],
+      "size": [
+        1020,
+        560
+      ],
+      "flags": {},
+      "order": 39,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "任务类型、素材编号与凭据安全",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "【任务与接线】\n• I2VA 只允许 1 个 Picture 锚点；多参考图或参考视频编辑请显式选 Ref2VA，并使用官方 ReferenceToVideo。节点不会自动改任务类型。\n• <Picture N> 按导演实际接入的参考图密集编号；<Video 1> 指同一条参考视频时间线。每个素材都应写清楚用于身份、动作、镜头还是声音。\n• reference_fidelity=auto 在 Ref2VA 视频任务中采用结构跟随；动作/姿态/切镜必须严格复刻时改为 locked。creative 只增加表现，不得越过跟随档。\n\n【规则与凭据】\n• 文件直载的 rule_pack 已接规则组合节点，参与作用域、依赖和冲突消解；不要再把同一文件的原样文本重复接到导演。\n• 云端 Key 保存在本机 ComfyUI/user 凭据文件，不写入工作流。模型 ID 留空使用受控预设；不要把私人 Base URL、Key、媒体文件名或绝对路径保存进公开模板。\n• Gemini 原生视频输入默认留空且不接线；只有切换 Gemini 并做原生视频 A/B 时才使用。"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
     }
   ],
   "links": [
@@ -2622,7 +3082,7 @@
       274,
       0,
       271,
-      9,
+      13,
       "STRING"
     ],
     [
@@ -2630,7 +3090,7 @@
       255,
       0,
       271,
-      11,
+      15,
       "STRING"
     ],
     [
@@ -2678,8 +3138,16 @@
       274,
       3,
       271,
-      10,
+      14,
       "STRING"
+    ],
+    [
+      484,
+      283,
+      2,
+      274,
+      0,
+      "H3_PROMPT_RULE_PACK"
     ]
   ],
   "groups": [
@@ -2733,12 +3201,12 @@
     },
     {
       "id": 32,
-      "title": "参考图资产API识别润色自然语言提示词",
+      "title": "提示词导演：云端主路径 + 可选规则/时间线工具",
       "bounding": [
-        -3400,
-        3580,
-        2000,
-        1700
+        -4250,
+        3250,
+        2900,
+        2450
       ],
       "color": "#3f789e",
       "flags": {}

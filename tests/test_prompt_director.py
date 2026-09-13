@@ -640,6 +640,9 @@ def test_node_registered():
     assert required["max_tokens"][1]["max"] == 131072
     assert required["api_failure_policy"][0] == ["stop", "passthrough"]
     assert required["api_failure_policy"][1]["default"] == "stop"
+    assert "reference_fidelity" not in required
+    assert optional["reference_fidelity"][0] == ["auto", "locked", "structural", "loose"]
+    assert optional["reference_fidelity"][1]["default"] == "auto"
     assert "qwen3_8" in required["model_profile"][0]
     assert "deepseek_vision" in required["model_profile"][0]
     assert required["output_language"][1]["default"] == "English"
@@ -1027,6 +1030,32 @@ def test_reference_ports_are_densely_renumbered(monkeypatch):
     assert "(3, 1)" in report
 
 
+def test_i2va_multiple_reference_images_stop_before_api_call(monkeypatch):
+    """错配应在图片编码/联网前失败，不能白等一次云端导演调用。"""
+    from unittest.mock import MagicMock
+    import pytest
+    import torch
+
+    mod = _load_mod()
+    called = MagicMock()
+    encoded = MagicMock(side_effect=AssertionError("不应编码图片"))
+    monkeypatch.setattr(mod, "_call_chat", called)
+    monkeypatch.setattr(mod, "_image_tensor_to_data_url", encoded)
+
+    with pytest.raises(RuntimeError, match="调用提示词 API 前停止"):
+        mod.MiniMaxH3PromptDirector().direct(
+            prompt="replace performer", task_type="I2VA", duration_seconds=5.0,
+            shot_count=1, rewrite_mode="balanced", output_language="English",
+            api_base_url="https://api.deepseek.com", api_model="vision-model",
+            api_key="", temperature=0.2, max_tokens=2048, timeout_s=30,
+            analysis_mode="single",
+            ref_image_1=torch.zeros((1, 8, 8, 3), dtype=torch.float32),
+            ref_image_2=torch.zeros((1, 8, 8, 3), dtype=torch.float32),
+        )
+    called.assert_not_called()
+    encoded.assert_not_called()
+
+
 def test_video_frame_sequence_single_mode_sends_all_selected_without_picture_labels(monkeypatch):
     """单次模式：独立参考图仍编号 Picture；序列帧共同标为 Video 1。"""
     from unittest.mock import MagicMock
@@ -1066,11 +1095,129 @@ def test_video_frame_sequence_single_mode_sends_all_selected_without_picture_lab
     assert sum("<Video 1> 代表帧" in item for item in text_items) == 3
     assert "不得用泛称‘动漫女孩/一个人’" in system_text
     assert "不得给这些帧另编 Picture 标签" in system_text
+    assert "明确的单侧或其他非对称特征必须保持" in system_text
+    assert "不得镜像、补齐或对称化" in system_text
+    assert "source_performer_locator 只能使用人数、画面位置或正在进行的动作" in system_text
+    assert "不得在最终 Prompt IR 的任何字段逐项枚举已丢弃的源人物外观细节" in system_text
+    assert "只有参考视频发生真实切镜时才开始新的 [Shot N]" in system_text
+    assert "人物进出画、动作或姿势改变、运镜、遮挡、闪白" in system_text
+    assert "本次没有独立 <Audio N> 素材" in system_text
+    assert "不得声称复用、保留或原样采用源视频的人声" in system_text
+    assert "不得从嘴型、画面文字或字幕推断并抄写台词" in system_text
+    assert "non_diegetic_music 写 N/A" in system_text
+    assert "结构跟随" in system_text
+    assert "rewrite_mode 只决定该跟随边界内" in system_text
+    assert "Picture 1..1，Video 1..1，Audio=无" in system_text
+    assert "不得声称源片段等于目标时长" in system_text
     assert "参考视频序列帧=3/5 张" in report
+    assert "参考视频跟随档=structural（节点值=auto）" in report
+    assert "IR 媒体清单=Picture 1..1，Video 1..1，Audio=无" in report
     assert "自定义百分比" in report
     sheet_data = __import__("json").loads(sheet)
     assert sheet_data["video_frame_sequence"]["selected_indices"] == [0, 2, 4]
     assert sheet_data["video_frame_sequence"]["selection_mode"] == "custom_percent"
+
+
+def test_director_rejects_media_label_not_connected_or_user_declared(monkeypatch):
+    """模型不得从字幕/画面自行发明独立 Audio 标签。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    response = {
+        "subject_definitions": (
+            "<Subject 1> uses <Picture 1>. <Video 1> is the source. "
+            "<Audio 1> is the source audio."
+        ),
+        "summary": "[character replacement] Replace the performer.",
+        "retention_analysis": (
+            "<Picture 1>: identity. <Video 1>: motion. <Audio 1>: dialogue."
+        ),
+        "detailed_description": "[Shot 1] Follow <Video 1> with <Audio 1>.",
+        "overall_soundscape": "N/A",
+        "non_diegetic_music": "N/A",
+    }
+    monkeypatch.setattr(mod, "_call_chat", MagicMock(return_value=json.dumps(response)))
+    try:
+        mod.MiniMaxH3PromptDirector().direct(
+            prompt="replace performer", task_type="Ref2VA", duration_seconds=5.0,
+            shot_count=1, rewrite_mode="balanced", output_language="中文",
+            api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model",
+            api_key="", temperature=0.2, max_tokens=2048, timeout_s=30,
+            analysis_mode="single", frame_sequence_limit=3,
+            ref_image_1=torch.zeros((1, 8, 8, 3), dtype=torch.float32),
+            video_frame_sequence=torch.zeros((3, 8, 8, 3), dtype=torch.float32),
+        )
+        assert False, "未连接且用户未声明的 Audio 1 必须阻断"
+    except RuntimeError as exc:
+        assert "<Audio>" in str(exc)
+        assert "媒体清单外" in str(exc)
+
+
+def test_timeline_context_owns_frame_selection_and_director_does_not_resample(monkeypatch):
+    """成对连接代表帧与 manifest 后，导演的直连选帧参数不再产生第二次筛选。"""
+    from unittest.mock import MagicMock
+
+    mod = _load_mod()
+    response = {
+        "subject_definitions": (
+            "<Subject 1> is shown in <Picture 1>. "
+            "<Video 1> is the source performance video to edit."
+        ),
+        "summary": "[reference generation] Replace the performer in <Video 1>.",
+        "retention_analysis": "<Picture 1>: fully_preserved. <Video 1>: motion_only.",
+        "detailed_description": "[Shot 1] <Subject 1> follows <Video 1>.",
+        "overall_soundscape": "N/A",
+        "non_diegetic_music": "N/A",
+    }
+    called = MagicMock(return_value=json.dumps(response))
+    monkeypatch.setattr(mod, "_call_chat", called)
+    manifest = {
+        "schema": "minimax_h3.reference_video_timeline/v1",
+        "asset": {
+            "id": "video_1", "kind": "reference_video", "label": "<Video 1>",
+            "roles": ["motion", "camera", "timing"],
+        },
+        "sequence_label": "<Video 1>", "total_frames": 120, "fps": 24,
+        "duration_seconds": 5.0,
+        "frames": [
+            {"frame": idx, "time_sec": idx / 24, "timecode": "", "position": idx / 119}
+            for idx in [0, 30, 60, 90, 119]
+        ],
+        "segments": [{"segment": 1, "start_sec": 0, "end_sec": 5}],
+        "shot_boundaries_input": [2.5],
+    }
+    _enhanced, report, sheet, _ir = mod.MiniMaxH3PromptDirector().direct(
+        prompt="replace performer", task_type="Ref2VA", duration_seconds=5.0, shot_count=1,
+        rewrite_mode="balanced", output_language="中文",
+        api_base_url="http://127.0.0.1:1234/v1", api_model="vision-model", api_key="",
+        temperature=0.3, max_tokens=2048, timeout_s=30, analysis_mode="single",
+        frame_sequence_limit=2,
+        frame_selection_mode="custom_indices", frame_selection_spec="1,3",
+        ref_image_1=torch.zeros((1, 8, 8, 3), dtype=torch.float32),
+        video_frame_sequence=torch.zeros((5, 8, 8, 3), dtype=torch.float32),
+        video_timeline_manifest=json.dumps(manifest),
+    )
+    request_content = called.call_args.args[3][1]["content"]
+    assert sum(item.get("type") == "image_url" for item in request_content) == 6
+    assert any(
+        "上游已明确真实切镜边界为 2.500s" in item.get("text", "")
+        for item in request_content
+    )
+    assert "参考视频序列帧=5/120 张" in report
+    assert "导演节点的帧数、选帧方式与自定义选帧参数本次不生效" in report
+    sheet_data = json.loads(sheet)["video_frame_sequence"]
+    assert sheet_data["selection_owner"] == "timeline_context"
+    assert sheet_data["selection_mode"] == "timeline_context"
+    assert sheet_data["selection_spec"] == ""
+    assert sheet_data["selected_indices"] == [0, 30, 60, 90, 119]
+
+
+def test_user_can_explicitly_declare_external_media_label():
+    mod = _load_mod()
+    inventory = mod._build_media_inventory(
+        "Use externally connected <Audio 1> with <Video 2>.", 1, True,
+    )
+    assert inventory == {"picture": 1, "video": 2, "audio": 1}
 
 
 def test_video_frame_sequence_auto_staged_joint_analysis_then_text_summary(monkeypatch):
@@ -1498,6 +1645,8 @@ def test_gemini_native_video_part_is_prepared_and_remote_file_deleted(monkeypatc
 def test_timeline_manifest_projection_preserves_source_indices_and_segments():
     mod = _load_mod()
     manifest = {
+        "schema": "minimax_h3.reference_video_timeline/v1",
+        "asset": {"id": "video_1", "kind": "reference_video"},
         "sequence_label": "<Video 1>", "total_frames": 240, "fps": 24,
         "duration_seconds": 10.0,
         "frames": [
@@ -1506,6 +1655,7 @@ def test_timeline_manifest_projection_preserves_source_indices_and_segments():
             {"frame": 239, "time_sec": 9.958, "timecode": "00:09.958", "position": 1},
         ],
         "segments": [{"segment": 1, "start_sec": 0, "end_sec": 5}],
+        "shot_boundaries_input": [0, 5, 10, "bad"],
         "untrusted_extra": "ignore me",
     }
     projected = mod._parse_timeline_manifest(json.dumps(manifest), input_frame_count=3)
@@ -1513,6 +1663,9 @@ def test_timeline_manifest_projection_preserves_source_indices_and_segments():
     assert projected["segments"][0]["segment"] == 1
     assert projected["segments"][0]["start_sec"] == 0.0
     assert projected["segments"][0]["end_sec"] == 5.0
+    assert projected["shot_boundaries_input"] == [5.0]
+    assert projected["schema"] == "minimax_h3.reference_video_timeline/v1"
+    assert projected["asset"]["roles"] == ["motion", "camera", "timing"]
     assert "untrusted_extra" not in projected
 
 
@@ -1600,6 +1753,11 @@ def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     ]
     assert required["frame_sequence_limit"][1]["max"] == 600
     assert required["gemini_video_route"][0] == ["auto", "inline", "file_api"]
+    assert "reference_fidelity" not in required
+    assert inputs["optional"]["reference_fidelity"][0] == [
+        "auto", "locked", "structural", "loose",
+    ]
+    assert inputs["optional"]["reference_fidelity"][1]["default"] == "auto"
     assert inputs["optional"]["cloud_video"][0] == "MINIMAX_H3_CLOUD_VIDEO"
     assert inputs["optional"]["comfy_video"][0] == "VIDEO"
     assert inputs["optional"]["video_timeline_manifest"][0] == "STRING"
@@ -1645,6 +1803,7 @@ def test_cloud_director_secure_surface_and_shared_core(monkeypatch):
     assert captured["model_profile"] == "deepseek_vision"
     assert captured["api_failure_policy"] == "stop"
     assert captured["analysis_mode"] == "single"
+    assert captured["reference_fidelity"] == "auto"
     assert captured["_gemini_video_route"] == "auto"
     assert captured["_gemini_video_fps"] == 0.0
 

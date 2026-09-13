@@ -242,6 +242,13 @@ def _build_timeline_manifest(
         })
 
     return {
+        "schema": "minimax_h3.reference_video_timeline/v1",
+        "asset": {
+            "id": "video_1",
+            "kind": "reference_video",
+            "label": "<Video 1>",
+            "roles": ["motion", "camera", "timing"],
+        },
         "sequence_label": "<Video 1>",
         "fps": round(float(fps), 3),
         "total_frames": int(sequence_total),
@@ -746,8 +753,9 @@ class MiniMaxH3VideoContext:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 Lab/Media"
     DESCRIPTION = (
-        "Deterministic <Video 1> timeline context: sample frames, normalize timecodes, "
-        "split shots, and emit a JSON manifest without calling any LLM."
+        "Prepare one <Video 1> reference: select representative frames, preserve their "
+        "source timecodes, and emit a JSON manifest without calling any LLM. This node "
+        "does not crop the incoming frame batch."
     )
 
     def build(
