@@ -8,12 +8,16 @@ Steering 允许在不修改任何权重文件的前提下，对 MiniMax-H3 文�
 
 > Keywords: `comfyui` · `minimax-h3` · `steering` · `activation-direction` · `abliteration` · `text-encoder` · `qwen3vl` · `prompt-director` · `prompt-modules` · `local-first` · `lm-studio`
 
-## ✨ v0.3.0-alpha.1：云端多模态导演与可复现创作规则管线
+## ✨ v0.3.0-alpha.2：参考视频跟随、IR 纪律与公开模板
 
 **MiniMax-H3-Lab —— 面向本地小/中型多模态模型的 H3 Prompt 实验与编译工具。**
 
 使用 LM Studio / OpenAI-compatible API，将中文创意与最多 9 张参考图整理为 MiniMax H3 结构化提示词。
 
+- **参考视频跟随档**：`auto/locked/structural/loose` 与改写自由度分离，避免创意模式越过动作、姿势、镜头和时点约束
+- **真实时间线上下文**：可从完整 IMAGE 帧批次均匀选择代表帧，并向导演传递源索引、时间码和真实切镜；代表帧数不是秒数
+- **IR 与媒体清单前置校验**：镜头编号、Picture 数量和未接入的媒体标签会在进入 H3 前失败；I2VA 多图在提示词 API 调用前停止
+- **公开 Ref2VA 模板更新**：云端导演作为主路径，规则文件直载、时间线和 Gemini 原生视频入口分区展示并附接线/安全注释
 - **Local-first**：默认连接 `http://127.0.0.1:1234/v1`（LM Studio），本地服务可留空 key；仍需先启动服务并加载可识图模型
 - **单次 / 分阶段多图分析**：`auto` 模式 0-2 图单次、3-9 图分阶段（逐素材视觉分析 → 文字摘要 → 合并写作）；最终 API/JSON/IR 失败默认停止工作流，避免原提示词静默流入视频生成
 - **Qwen3.8 分阶段思考适配**：自动模式把推理能力留给逐图/视频序列理解，最终 Prompt IR 编译改为 non-thinking；保留 `finish_reason` 与 prompt/completion/reasoning token 诊断，截断时自动直接作答重试一次
@@ -270,6 +274,11 @@ git clone https://github.com/qihanqihan-gif/ComfyUI-MiniMaxH3-Steering.git
 
 或通过 ComfyUI-Manager 的 Custom Nodes 搜索安装（注册后）。重启 ComfyUI 即生效，无需额外依赖（纯 Python + torch/numpy）。
 
+GitHub Release 提供两个资产：
+
+- `MiniMaxH3-Lab-vX.Y.Z.zip`：完整插件，普通用户下载这个。
+- `MiniMaxH3-Lab-Prompt-Modules-Only-vX.Y.Z.zip`：只含公开 `prompt_modules/` 的规则库覆盖包，**不能单独作为插件安装**；仅用于给同版本完整插件覆盖更新规则。`prompt_modules/user/` 中的个人 JSON 和 WF 本地副本内容不会进入该资产。
+
 ## 测试
 
 从 **ComfyUI 根目录**运行（不要在插件目录内部直接收集，因为 pytest 会把带连字符的插件目录误当成顶层包）：
@@ -278,8 +287,7 @@ git clone https://github.com/qihanqihan-gif/ComfyUI-MiniMaxH3-Steering.git
 python -m pytest custom_nodes/ComfyUI-MiniMaxH3-Steering/tests -q --import-mode=importlib
 ```
 
-当前开发副本：`234 passed`（26 ComfyUI Python + ComfyUI 根目录，2026-09-01；4 条环境自带
-Triton 弃用警告不属于测试失败）。
+当前发布副本：`245 passed`（ComfyUI 内置 Python + ComfyUI 根目录，2026-09-13；环境自带弃用警告不属于测试失败）。
 
 ## 许可证与合规
 

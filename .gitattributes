@@ -8,3 +8,10 @@
 *.mp4 binary
 *.npy binary
 *.zip binary
+
+# ``git archive`` is the release source. Keep development/CI-only material out
+# of installable plugin archives while retaining runtime helper scripts.
+/.gitattributes export-ignore
+/.github export-ignore
+/pyproject.toml export-ignore
+/tests export-ignore
